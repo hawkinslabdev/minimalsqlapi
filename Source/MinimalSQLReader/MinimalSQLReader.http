@@ -1,6 +1,6 @@
 @MinimalSQLReader_HostAddress = http://localhost:5252
 
-GET {{MinimalSQLReader_HostAddress}}/weatherforecast/
+GET {{MinimalSQLReader_HostAddress}}/api/
 Accept: application/json
 
 ###

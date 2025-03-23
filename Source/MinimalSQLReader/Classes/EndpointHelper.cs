@@ -19,6 +19,17 @@ public static class EndpointHelper
 
             if (!File.Exists(file))
             {
+                // Special handling for Webhooks
+                if (endpoint.Equals("Webhooks", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log.Warning("⚠️ entity.json not found for Webhooks, loading default configuration.");
+                    return new EndpointEntity
+                    {
+                        DatabaseObjectName = "DefaultWebhooksHandler", // Placeholder
+                        DatabaseSchema = "dbo" // Default schema
+                    };
+                }
+
                 Log.Warning("⚠️ entity.json not found for endpoint: {Endpoint}", endpoint);
                 return null;
             }
@@ -26,14 +37,31 @@ public static class EndpointHelper
             var json = File.ReadAllText(file);
             var entity = JsonSerializer.Deserialize<EndpointEntity>(json);
 
+            // Special handling for invalid or missing DatabaseObjectName
             if (entity == null || string.IsNullOrWhiteSpace(entity.DatabaseObjectName))
             {
+                if (endpoint.Equals("Webhooks", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log.Warning("⚠️ Invalid or missing DatabaseObjectName for Webhooks, using default configuration.");
+                    return new EndpointEntity
+                    {
+                        DatabaseObjectName = "DefaultWebhooksHandler", // Placeholder
+                        DatabaseSchema = "dbo" // Default schema
+                    };
+                }
+
                 Log.Warning("⚠️ Invalid or missing DatabaseObjectName for endpoint: {Endpoint}", endpoint);
                 return null;
             }
 
+            // Default settings for other endpoints
             entity.DatabaseSchema ??= "dbo";
-            entity.AllowedColumns ??= new List<string>();
+
+            // Skip AllowedColumns handling for Webhooks
+            if (!endpoint.Equals("Webhooks", StringComparison.OrdinalIgnoreCase))
+            {
+                entity.AllowedColumns ??= new List<string>();
+            }
 
             return entity;
         }
@@ -43,6 +71,7 @@ public static class EndpointHelper
             return null;
         }
     }
+
 
     /// <summary>
     /// Loads all endpoint definitions from /endpoints and logs them.

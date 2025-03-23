@@ -30,7 +30,6 @@ Log.Logger = new LoggerConfiguration()
          logEvent.Properties["RequestPath"].ToString().Contains("/index.html")))
     .CreateLogger();
 
-
 builder.Host.UseSerilog();
 builder.Configuration.AddJsonFile("appsettings.json", optional: false);
 
@@ -118,4 +117,11 @@ app.Use(async (context, next) =>
 app.UseMiddleware<TokenAuthMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
+
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    var urls = app.Urls.Any() ? string.Join(", ", app.Urls) : "http://localhost:5252";
+    Log.Information("🌐 Application running at: {Urls}", urls);
+});
+
 app.Run();

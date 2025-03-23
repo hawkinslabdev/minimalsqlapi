@@ -11,7 +11,7 @@ public class MinimalSqlReaderDocumentFilter : IDocumentFilter
 {
     public void Apply(OpenApiDocument swaggerDoc, DocumentFilterContext context)
     {
-        var endpoints = EndpointHelper.GetEndpoints(silent: true);
+        var endpoints = EndpointHelper.GetEndpoints(silent: true).ToDictionary(kvp => kvp.Key, kvp => (dynamic)kvp.Value);
         var environments = GetEnvironmentNames();
 
         // Remove all controller-discovered paths
@@ -31,9 +31,20 @@ public class MinimalSqlReaderDocumentFilter : IDocumentFilter
             }
         }
 
-        // Re-add only our custom dynamic endpoints
+        // Re-add standard API endpoints
+        AddStandardApiEndpoints(swaggerDoc, endpoints, environments);
+        
+        // Add webhook endpoints (POST only)
+        AddWebhookEndpoints(swaggerDoc, environments);
+    }
+
+    private void AddStandardApiEndpoints(OpenApiDocument swaggerDoc, Dictionary<string, dynamic> endpoints, List<string> environments)
+    {
         foreach (var (endpointName, entity) in endpoints)
         {
+            if (endpointName == "Webhooks")
+            continue;
+
             var path = $"/api/{{env}}/{endpointName}";
             if (!swaggerDoc.Paths.ContainsKey(path))
                 swaggerDoc.Paths[path] = new OpenApiPathItem();
@@ -88,6 +99,103 @@ public class MinimalSqlReaderDocumentFilter : IDocumentFilter
         }
     }
 
+    private void AddWebhookEndpoints(OpenApiDocument swaggerDoc, List<string> environments)
+    {
+        var webhookEndpointConfig = EndpointHelper.LoadEndpoint("Webhooks");
+        if (webhookEndpointConfig == null)
+        {
+            Log.Warning("⚠️ Webhooks endpoint configuration not found. Skipping Swagger documentation for webhooks.");
+            return;
+        }
+
+        var path = "/webhook/{env}/{webhookId}";
+
+        if (!swaggerDoc.Paths.ContainsKey(path))
+            swaggerDoc.Paths[path] = new OpenApiPathItem();
+            
+        // Clear ALL operations before adding POST
+        swaggerDoc.Paths[path].Operations.Clear();
+
+        // Define the POST operation
+        var operation = new OpenApiOperation
+        {
+            Tags = new List<OpenApiTag> { new() { Name = "Webhooks" } },
+            Summary = "Process incoming webhook",
+            Description = "Receives and stores webhook data in the database",
+            OperationId = "process_webhook",
+            Parameters = new List<OpenApiParameter>
+            {
+                new()
+                {
+                    Name = "env",
+                    In = ParameterLocation.Path,
+                    Required = true,
+                    Schema = new OpenApiSchema
+                    {
+                        Type = "string",
+                        Enum = environments.Select(e => new OpenApiString(e!)).Cast<IOpenApiAny>().ToList()
+                    },
+                    Description = "Target environment"
+                },
+                new()
+                {
+                    Name = "webhookId",
+                    In = ParameterLocation.Path,
+                    Required = true,
+                    Schema = new OpenApiSchema
+                    {
+                        Type = "string"
+                    },
+                    Description = "Webhook identifier (secret)"
+                }
+            },
+            RequestBody = new OpenApiRequestBody
+            {
+                Description = "Webhook payload (any valid JSON)",
+                Required = true,
+                Content = new Dictionary<string, OpenApiMediaType>
+                {
+                    ["application/json"] = new OpenApiMediaType
+                    {
+                        Schema = new OpenApiSchema
+                        {
+                            Type = "object",
+                            AdditionalProperties = new OpenApiSchema { Type = "object" }
+                        }
+                    }
+                }
+            },
+            Responses = new OpenApiResponses
+            {
+                ["200"] = new OpenApiResponse 
+                { 
+                    Description = "Webhook processed successfully",
+                    Content = new Dictionary<string, OpenApiMediaType>
+                    {
+                        ["application/json"] = new OpenApiMediaType
+                        {
+                            Schema = new OpenApiSchema
+                            {
+                                Type = "object",
+                                Properties = new Dictionary<string, OpenApiSchema>
+                                {
+                                    ["message"] = new OpenApiSchema { Type = "string" },
+                                    ["id"] = new OpenApiSchema { Type = "integer", Format = "int32" }
+                                }
+                            }
+                        }
+                    }
+                },
+                ["400"] = new OpenApiResponse { Description = "Bad Request" },
+                ["404"] = new OpenApiResponse { Description = "Webhook ID not found or not configured" },
+                ["500"] = new OpenApiResponse { Description = "Server Error" }
+            }
+        };
+
+        // Only add the POST operation, ensuring no GET operation exists
+        swaggerDoc.Paths[path].Operations[OperationType.Post] = operation;
+    }
+
     private static List<string> GetEnvironmentNames()
     {
         var root = Path.Combine(Directory.GetCurrentDirectory(), "environments");
@@ -100,16 +208,37 @@ public class MinimalSqlReaderDocumentFilter : IDocumentFilter
             .ToList();
     }
 }
-
 public static class SwaggerConfiguration
 {
     public static SwaggerSettings ConfigureSwagger(WebApplicationBuilder builder)
+    {
+        var swaggerSettings = LoadSwaggerSettings(builder.Configuration);
+
+        if (swaggerSettings.Enabled)
+        {
+            builder.Services.AddSwaggerGen(c =>
+            {
+                ConfigureSwaggerOptions(c, swaggerSettings);
+                c.DocumentFilter<MinimalSqlReaderDocumentFilter>();
+            });
+
+            Log.Information("✅ Swagger services registered successfully");
+        }
+        else
+        {
+            Log.Information("ℹ️ Swagger is disabled in configuration");
+        }
+
+        return swaggerSettings;
+    }
+
+    private static SwaggerSettings LoadSwaggerSettings(IConfiguration configuration)
     {
         var swaggerSettings = new SwaggerSettings();
 
         try
         {
-            var section = builder.Configuration.GetSection("Swagger");
+            var section = configuration.GetSection("Swagger");
             if (section.Exists())
             {
                 section.Bind(swaggerSettings);
@@ -125,11 +254,12 @@ public static class SwaggerConfiguration
             Log.Error(ex, "❌ Error loading Swagger configuration. Using default settings.");
         }
 
+        // Initialize default values if needed
         swaggerSettings.Contact ??= new ContactInfo();
         swaggerSettings.SecurityDefinition ??= new SecurityDefinitionInfo();
 
         if (string.IsNullOrWhiteSpace(swaggerSettings.Title))
-            swaggerSettings.Title = "MinimalSqlReader API";
+            swaggerSettings.Title = "API";
 
         if (string.IsNullOrWhiteSpace(swaggerSettings.Version))
             swaggerSettings.Version = "v1";
@@ -140,57 +270,50 @@ public static class SwaggerConfiguration
         if (string.IsNullOrWhiteSpace(swaggerSettings.SecurityDefinition.Scheme))
             swaggerSettings.SecurityDefinition.Scheme = "Bearer";
 
-        if (swaggerSettings.Enabled)
-        {
-            builder.Services.AddSwaggerGen(c =>
-            {
-                c.SwaggerDoc(swaggerSettings.Version, new OpenApiInfo
-                {
-                    Title = swaggerSettings.Title,
-                    Version = swaggerSettings.Version,
-                    Description = swaggerSettings.Description ?? "API Documentation",
-                    Contact = new OpenApiContact
-                    {
-                        Name = swaggerSettings.Contact.Name,
-                        Email = swaggerSettings.Contact.Email
-                    }
-                });
-
-                c.AddSecurityDefinition(swaggerSettings.SecurityDefinition.Name, new OpenApiSecurityScheme
-                {
-                    Description = swaggerSettings.SecurityDefinition.Description,
-                    Name = "Authorization",
-                    In = Enum.TryParse<ParameterLocation>(swaggerSettings.SecurityDefinition.In, true, out var paramLocation) ? paramLocation : ParameterLocation.Header,
-                    Type = Enum.TryParse<SecuritySchemeType>(swaggerSettings.SecurityDefinition.Type, true, out var type) ? type : SecuritySchemeType.ApiKey,
-                    Scheme = swaggerSettings.SecurityDefinition.Scheme
-                });
-
-                c.AddSecurityRequirement(new OpenApiSecurityRequirement
-                {
-                    {
-                        new OpenApiSecurityScheme
-                        {
-                            Reference = new OpenApiReference
-                            {
-                                Type = ReferenceType.SecurityScheme,
-                                Id = swaggerSettings.SecurityDefinition.Name
-                            }
-                        },
-                        new string[] { }
-                    }
-                });
-
-                c.DocumentFilter<MinimalSqlReaderDocumentFilter>();
-            });
-
-            Log.Information("✅ Swagger services registered successfully");
-        }
-        else
-        {
-            Log.Information("ℹ️ Swagger is disabled in configuration");
-        }
-
         return swaggerSettings;
+    }
+
+    private static void ConfigureSwaggerOptions(SwaggerGenOptions options, SwaggerSettings settings)
+    {
+        options.SwaggerDoc(settings.Version, new OpenApiInfo
+        {
+            Title = settings.Title,
+            Version = settings.Version,
+            Description = settings.Description ?? "API Documentation",
+            Contact = new OpenApiContact
+            {
+                Name = settings.Contact.Name,
+                Email = settings.Contact.Email
+            }
+        });
+
+        options.AddSecurityDefinition(settings.SecurityDefinition.Name, new OpenApiSecurityScheme
+        {
+            Description = settings.SecurityDefinition.Description,
+            Name = "Authorization",
+            In = Enum.TryParse<ParameterLocation>(settings.SecurityDefinition.In, true, out var paramLocation) 
+                ? paramLocation 
+                : ParameterLocation.Header,
+            Type = Enum.TryParse<SecuritySchemeType>(settings.SecurityDefinition.Type, true, out var type) 
+                ? type 
+                : SecuritySchemeType.ApiKey,
+            Scheme = settings.SecurityDefinition.Scheme
+        });
+
+        options.AddSecurityRequirement(new OpenApiSecurityRequirement
+        {
+            {
+                new OpenApiSecurityScheme
+                {
+                    Reference = new OpenApiReference
+                    {
+                        Type = ReferenceType.SecurityScheme,
+                        Id = settings.SecurityDefinition.Name
+                    }
+                },
+                new string[] { }
+            }
+        });
     }
 }
 
