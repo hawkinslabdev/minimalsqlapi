@@ -1,62 +1,51 @@
 # ✨ MinimalSQLReader API
 
-A dynamic, environment-aware OData-to-SQL reader for .NET (ASP.NET Core), featuring bearer token authentication, endpoint mapping via JSON configuration files, and Serilog-powered logging. Supports SQL Server and enables flexible query generation using OData syntax.
-
----
+A dynamic, environment-aware OData-to-SQL reader for .NET (ASP.NET Core), featuring secure bearer token authentication, endpoint mapping via JSON configuration files, and Serilog-powered logging. Supports SQL Server and enables flexible query generation using OData syntax.
 
 ## 🚀 Features
+- Environment-aware SQL database routing
+- Secure authentication
+- JSON-configured endpoints
+- Proxy-style SQL execution for HTTP methods (GET/POST)
+- Automatic Swagger documentation for endpoints
+- Serilog-powered logging with daily rotation
 
-- ✅ Environment-aware SQL database routing
-- ✨ OData-to-SQL conversion for dynamic querying
-- 🔐 Bearer Token Authentication (SQLite-backed)
-- 🔄 JSON-configured endpoints with column-level filtering
-- 🔄 Proxy-style SQL execution for HTTP methods (GET/POST)
-- 🖊️ Automatic Swagger documentation for endpoints
-- 📊 Serilog-powered logging with daily rotation
-
----
+Feel free to commit a pull request with your proposed features!
 
 ## 📦 Requirements
-
-- [.NET 8+ SDK](https://dotnet.microsoft.com/en-us/download)
+- [.NET 8+ ASP.NET Core Runtime](https://dotnet.microsoft.com/en-us/download)
+- Internet Information Services
 - SQL Server database access
-- Local write access to `log/`, `auth.db`, and `config/` folders
-
----
+- Local write access to local folder
 
 ## 🛠️ Setup
 
-### 1. Clone the repository
+The setup process is lean. Download the latest release, prepare your database connection, change the configuration files and set-up the app on your webserver.
 
-```bash
-git clone https://github.com/your-org/minimalsqlreader.git
-cd minimalsqlreader
-```
+### 1. Download the release
+Download the latest release from the releases section and extract it to your desired location.
 
 ### 2. Create required folders
-
+These folders will be automatically created when the application runs, but you can create them manually if needed:
 ```bash
 mkdir log
-mkdir config
-mkdir config/environments
-mkdir config/endpoints
+mkdir tokens
+mkdir environments
+mkdir endpoints
 ```
 
+The application will automatically generate necessary structures on first run, including the authentication database and token files.
+
 ### 3. Add a settings file
-
 **`config/environments/settings.json`**
-
 ```json
 {
   "ServerName": "localhost",
-  "ConnectionString": "Server=VM2K22;Database=600;Trusted_Connection=True;TrustServerCertificate=true;"
+  "ConnectionString": "Server=localhost;Database=AdventureWorks;Trusted_Connection=True;TrustServerCertificate=true;"
 }
 ```
-
 ### 4. Add an endpoint configuration
-
 **Example: `config/endpoints/items.json`**
-
 ```json
 {
   "DatabaseObjectName": "Items",
@@ -69,83 +58,77 @@ mkdir config/endpoints
   ]
 }
 ```
-
 ### 5. Run the application
 
-```bash
-dotnet run
-```
+Configure the application as a website in Internet Information Services, and you're done! Make sure to bind the application pool to an user with the right permissions, if you're not using a connection string that's bound to a specific user.
 
----
 
-## 🔐 Authentication
+## Secure authentication
+- On first run, a SQLite database `auth.db` will be created with an enhanced security model
+- The system automatically generates a token bound to the machine name:
+  ```text
+  🗝️ Generated token for SERVER-1: <your-token>
+  💾 Token saved to: /tokens/SERVER-1.txt
+  ```
+- Tokens are securely stored in the database using unique user names with PBKDF2 hashing with SHA256.
 
-- On first run, a SQLite database `auth.db` will be created.
-- If no tokens exist, a default token will be generated and logged:
+- Include the token in requests as:
+  ```http
+  Authorization: Bearer YOUR_TOKEN
+  ```
+- Each user's token is saved to a dedicated file at `/tokens/<username>.txt` for easy distribution
 
-```text
-🔑 Generated token: 8f3e7b9e-4c7a-4e5c-b6c1-fc129ad6fe65
-```
+### Managing Tokens
+The system automatically creates tokens during initialization, but you can also:
+- Check the `/tokens/` directory for plain text token files
+- Access tokens in the application logs during generation
+- Bind tokens to specific usernames for better security
 
-- Include it in requests as:
-
-```http
-Authorization: Bearer YOUR_TOKEN
-```
-
----
 
 ## 🔄 API Usage
-
 **Pattern:**
-
 ```
 /api/{environment}/{endpoint}/{odata-query}
 ```
-
 **Example:**
-
 ```http
-GET /api/600/items?$filter=Assortment eq 'Books'
+GET /api/AdventureWorks/items?$filter=Assortment eq 'Books'
 ```
-
 Will execute the following SQL query (based on `items.json`):
-
 ```sql
 SELECT ItemCode, Description, Assortment, sysguid
 FROM dbo.Items
 WHERE Assortment = 'Books'
 ```
 
----
-
 ## 📅 Logging
-
 - Logs are stored in the `/log` folder and rotate daily.
 - Console output includes timestamps.
 - EF Core database commands are logged at `Warning` level to avoid verbosity.
-
----
+- Authentication events are logged for auditing purposes.
 
 ## 📺 Project Structure
-
 | Path                          | Description                                      |
 |-------------------------------|--------------------------------------------------|
 | `/log`                        | Rolling file logs                                |
-| `/auth.db`                    | SQLite database storing bearer tokens            |
+| `/auth.db`                    | SQLite database storing secure token hashes      |
+| `/tokens`                     | Plain text token files for distribution          |
 | `/config/environments`        | Environment configurations                       |
 | `/config/endpoints`           | Endpoint-specific database mappings              |
+---
+## 🔒 Security Model
+The authentication system implements industry best practices:
+- No plaintext tokens stored in the database
+- Cryptographically secure hashing with PBKDF2/SHA256
+- Unique salt generation for each token
+- Username binding for token ownership and auditing
+- File-based token distribution for better management
 
 ---
-
 ## ✨ Credits
-
 Built with ❤️ using:
-
 - [ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/)
 - [DynamicODataToSQL](https://github.com/your-org/dynamicodata-to-sql)
 - [Serilog](https://serilog.net/)
 - [SQLite](https://www.sqlite.org/index.html)
-
-*Generated on 2025-03-23*
-
+*Generated on 2025-03-30*

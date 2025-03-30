@@ -43,6 +43,7 @@ builder.Services.AddSingleton<IEdmModelBuilder, EdmModelBuilder>();
 builder.Services.AddSingleton<Compiler, SqlServerCompiler>();
 builder.Services.AddSingleton<IODataToSqlConverter, ODataToSqlConverter>();
 builder.Services.AddSingleton<EnvironmentSettings>();
+builder.Services.AddScoped<TokenService>();
 
 var swaggerSettings = SwaggerConfiguration.ConfigureSwagger(builder);
 
@@ -65,6 +66,8 @@ app.UseStaticFiles();
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+    var tokenService = scope.ServiceProvider.GetRequiredService<TokenService>();
+    
     try
     {
         context.Database.EnsureCreated();
@@ -72,15 +75,15 @@ using (var scope = app.Services.CreateScope())
 
         if (!context.Tokens.Any())
         {
-            var token = new AuthToken { Token = Guid.NewGuid().ToString() };
-            context.Tokens.Add(token);
-            context.SaveChanges();
-            Log.Information("🗝️ Generated token: {Token}", token.Token);
+            string username = Environment.MachineName;
+            var token = await tokenService.GenerateTokenAsync(username);
+            Log.Information("🗝️ Generated token for {Username}: {Token}", username, token);
+            Log.Information("💾 Token saved to: {Path}", Path.Combine(Directory.GetCurrentDirectory(), "tokens", $"{username}.txt"));
         }
     }
     catch (Exception ex)
     {
-        Log.Error("❌ Database initialization failed: {Message}", ex.Message);
+        Log.Error("❌ Authentication system initialization failed: {Message}", ex.Message);
     }
 }
 
