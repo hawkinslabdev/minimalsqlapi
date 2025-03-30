@@ -2,6 +2,8 @@
 
 A dynamic, environment-aware SQL Server API for Internet Information Services. Built on .NET (ASP.NET Core), featuring secure bearer token authentication, endpoint mapping via JSON configuration files, and Serilog-powered logging. Supports SQL Server and enables flexible query generation using OData syntax. Now also supports a POST-route for webhook-functionality.
 
+![Screenshot of Swagger UI](https://github.com/hawkinslabdev/minimalsqlreader/raw/main/Source/example.png)
+
 ## 🚀 Features
 - Environment-aware SQL database routing
 - Secure authentication
