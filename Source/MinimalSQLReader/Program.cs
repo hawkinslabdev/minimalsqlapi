@@ -18,7 +18,8 @@ Log.Logger = new LoggerConfiguration()
         rollOnFileSizeLimit: true,
         retainedFileCountLimit: 5,
         restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Information,
-        buffered: true)
+        buffered: true,
+        flushToDiskInterval: TimeSpan.FromSeconds(30))
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", Serilog.Events.LogEventLevel.Warning)
@@ -36,6 +37,7 @@ builder.Configuration.AddJsonFile("appsettings.json", optional: false);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddHostedService<LogFlusher>();
 
 // 🧩 Register required services for DynamicODataToSQL
 builder.Services.AddSingleton<IHostedService, StartupLogger>();
@@ -77,7 +79,7 @@ using (var scope = app.Services.CreateScope())
         {
             string username = Environment.MachineName;
             var token = await tokenService.GenerateTokenAsync(username);
-            Log.Information("🗝️ Generated token for {Username}: {Token}", username, token);
+            Log.Debug("🗝️ Generated token for {Username}: {Token}", username, token);
             Log.Information("💾 Token saved to: {Path}", Path.Combine(Directory.GetCurrentDirectory(), "tokens", $"{username}.txt"));
         }
     }
@@ -125,6 +127,12 @@ app.Lifetime.ApplicationStarted.Register(() =>
 {
     var urls = app.Urls.Any() ? string.Join(", ", app.Urls) : "http://localhost:5252";
     Log.Information("🌐 Application running at: {Urls}", urls);
+});
+
+app.Lifetime.ApplicationStopping.Register(() => 
+{
+    Log.Information("Application shutting down...");
+    Log.CloseAndFlush();
 });
 
 app.Run();

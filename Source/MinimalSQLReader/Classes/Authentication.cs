@@ -10,7 +10,7 @@ public class TokenAuthMiddleware
     private readonly RequestDelegate _next;
 
     public TokenAuthMiddleware(RequestDelegate next)
-    {
+    {s
         _next = next;
     }
 
@@ -39,7 +39,7 @@ public class TokenAuthMiddleware
 
         var token = authHeader.ToString().Substring("Bearer ".Length).Trim();
 
-        // Verify token using the token service instead of direct DB query
+        
         bool isValid = await tokenService.VerifyTokenAsync(token);
         if (!isValid)
         {
@@ -96,27 +96,22 @@ public class TokenService
         _dbContext = dbContext;
         _tokenFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "tokens");
         
-        // Ensure tokens directory exists
+        
         if (!Directory.Exists(_tokenFolderPath))
         {
             Directory.CreateDirectory(_tokenFolderPath);
         }
     }
-
-    // Generate a new token for a user
+  
     public async Task<string> GenerateTokenAsync(string username)
     {
-        // Generate a random token
         string token = Guid.NewGuid().ToString();
         
-        // Generate salt for hashing
         byte[] salt = GenerateSalt();
         string saltString = Convert.ToBase64String(salt);
-        
-        // Hash the token
         string hashedToken = HashToken(token, salt);
         
-        // Create a new token entry
+        
         var tokenEntry = new AuthToken
         {
             Username = username,
@@ -125,32 +120,28 @@ public class TokenService
             CreatedAt = DateTime.UtcNow
         };
         
-        // Add to database
+        
         _dbContext.Tokens.Add(tokenEntry);
         await _dbContext.SaveChangesAsync();
         
-        // Save token to file
+        
         await SaveTokenToFileAsync(username, token);
         
         return token;
     }
 
-    // Verify if a token is valid
     public async Task<bool> VerifyTokenAsync(string token)
     {
-        // Get all tokens
+        
         var tokens = await _dbContext.Tokens.ToListAsync();
         
-        // Check each token
+        
         foreach (var storedToken in tokens)
         {
-            // Convert stored salt from string to bytes
-            byte[] salt = Convert.FromBase64String(storedToken.TokenSalt);
             
-            // Hash the provided token with the stored salt
+            byte[] salt = Convert.FromBase64String(storedToken.TokenSalt);
             string hashedToken = HashToken(token, salt);
             
-            // Compare hashed tokens
             if (hashedToken == storedToken.TokenHash)
             {
                 return true;
@@ -160,7 +151,6 @@ public class TokenService
         return false;
     }
 
-    // Helper method to hash a token
     private string HashToken(string token, byte[] salt)
     {
         using (var pbkdf2 = new Rfc2898DeriveBytes(token, salt, 10000, HashAlgorithmName.SHA256))
@@ -170,7 +160,7 @@ public class TokenService
         }
     }
 
-    // Helper method to generate a random salt
+    
     private byte[] GenerateSalt()
     {
         byte[] salt = new byte[16];
@@ -181,7 +171,7 @@ public class TokenService
         return salt;
     }
 
-    // Helper method to save a token to a file
+    
     private async Task SaveTokenToFileAsync(string username, string token)
     {
         try
