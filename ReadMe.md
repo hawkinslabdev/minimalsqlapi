@@ -8,7 +8,8 @@ A dynamic, environment-aware SQL Server API for Internet Information Services. B
 - Environment-aware SQL database routing
 - Secure authentication
 - JSON-configured endpoints
-- Proxy-style SQL execution for HTTP methods (GET/POST)
+- SQL execution for HTTP methods with granular control (GET/POST/MERGE/DELETE)
+- Stored procedure support for data manipulation
 - Automatic Swagger documentation for endpoints
 - Serilog-powered logging with daily rotation
 
