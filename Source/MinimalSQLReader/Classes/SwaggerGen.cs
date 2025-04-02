@@ -14,7 +14,6 @@ public class MinimalSqlReaderDocumentFilter : IDocumentFilter
         var endpoints = EndpointHelper.GetEndpoints(silent: true).ToDictionary(kvp => kvp.Key, kvp => (dynamic)kvp.Value);
         var environments = GetEnvironmentNames();
 
-        // Remove all controller-discovered paths
         var controllerDiscoveredPaths = context.ApiDescriptions
             .Where(desc => desc.ActionDescriptor.RouteValues.ContainsKey("controller"))
             .Select(desc => desc.RelativePath)
@@ -31,71 +30,279 @@ public class MinimalSqlReaderDocumentFilter : IDocumentFilter
             }
         }
 
-        // Re-add standard API endpoints
-        AddStandardApiEndpoints(swaggerDoc, endpoints, environments);
+        var tagNames = endpoints.Keys
+            .Where(name => name != "Webhooks")
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         
-        // Add webhook endpoints (POST only)
+        var sortedTags = new List<OpenApiTag>();
+        
+        foreach (var name in tagNames)
+        {
+            sortedTags.Add(new OpenApiTag { Name = name });
+        }
+        
+        if (endpoints.ContainsKey("Webhooks"))
+        {
+            sortedTags.Add(new OpenApiTag { Name = "Webhooks" });
+        }
+        
+        swaggerDoc.Tags = sortedTags;
+
+        AddStandardApiEndpoints(swaggerDoc, endpoints, environments);
         AddWebhookEndpoints(swaggerDoc, environments);
     }
 
     private void AddStandardApiEndpoints(OpenApiDocument swaggerDoc, Dictionary<string, dynamic> endpoints, List<string> environments)
     {
-        foreach (var (endpointName, entity) in endpoints)
+        var sortedEndpoints = endpoints
+            .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        
+        // Debug log to verify the order
+        foreach (var kvp in sortedEndpoints)
+        {
+            Log.Debug("🔄 Adding endpoint to Swagger in order: {EndpointName}", kvp.Key);
+        }
+        
+        foreach (var (endpointName, entity) in sortedEndpoints)
         {
             if (endpointName == "Webhooks")
-            continue;
-
+                continue;
+                
+            var allowedMethods = entity.AllowedMethods as List<string> ?? new List<string> { "GET" };
+            var procedureConfigured = !string.IsNullOrEmpty(entity.Procedure);
+            
+            // Only add the operations that are configured for this endpoint
             var path = $"/api/{{env}}/{endpointName}";
             if (!swaggerDoc.Paths.ContainsKey(path))
                 swaggerDoc.Paths[path] = new OpenApiPathItem();
 
-            var operation = new OpenApiOperation
+            // Add GET operation if allowed
+            if (allowedMethods.Contains("GET"))
             {
-                Tags = new List<OpenApiTag> { new() { Name = endpointName } },
-                Summary = $"GET {endpointName} records",
-                Description = $"Query the {endpointName} endpoint using OData filters",
-                OperationId = $"get_{endpointName}".ToLowerInvariant(),
-                Parameters = new List<OpenApiParameter>
+                var getOperation = new OpenApiOperation
                 {
-                    new()
+                    Tags = new List<OpenApiTag> { new() { Name = endpointName } },
+                    Summary = $"GET {endpointName} records",
+                    Description = $"Query the {endpointName} endpoint using OData filters",
+                    OperationId = $"get_{endpointName}".ToLowerInvariant(),
+                    Parameters = new List<OpenApiParameter>
                     {
-                        Name = "env",
-                        In = ParameterLocation.Path,
-                        Required = true,
-                        Schema = new OpenApiSchema
+                        new()
                         {
-                            Type = "string",
-                            Enum = environments.Select(e => new OpenApiString(e!)).Cast<IOpenApiAny>().ToList()
+                            Name = "env",
+                            In = ParameterLocation.Path,
+                            Required = true,
+                            Schema = new OpenApiSchema
+                            {
+                                Type = "string",
+                                Enum = environments.Select(e => new OpenApiString(e!)).Cast<IOpenApiAny>().ToList()
+                            },
+                            Description = "Target environment"
                         },
-                        Description = "Target environment"
+                        new()
+                        {
+                            Name = "$filter",
+                            In = ParameterLocation.Query,
+                            Required = false,
+                            Schema = new OpenApiSchema { Type = "string" },
+                            Description = "OData $filter"
+                        },
+                        new()
+                        {
+                            Name = "$select",
+                            In = ParameterLocation.Query,
+                            Required = false,
+                            Schema = new OpenApiSchema { Type = "string" },
+                            Description = "OData $select"
+                        },
+                        new()
+                        {
+                            Name = "$orderby",
+                            In = ParameterLocation.Query,
+                            Required = false,
+                            Schema = new OpenApiSchema { Type = "string" },
+                            Description = "OData $orderby"
+                        },
+                        new()
+                        {
+                            Name = "$top",
+                            In = ParameterLocation.Query,
+                            Required = false,
+                            Schema = new OpenApiSchema { Type = "integer", Default = new OpenApiInteger(10) },
+                            Description = "OData $top (max records to return)"
+                        },
+                        new()
+                        {
+                            Name = "$skip",
+                            In = ParameterLocation.Query,
+                            Required = false,
+                            Schema = new OpenApiSchema { Type = "integer", Default = new OpenApiInteger(0) },
+                            Description = "OData $skip (records to skip)"
+                        }
                     },
-                    new()
+                    Responses = new OpenApiResponses
                     {
-                        Name = "$filter",
-                        In = ParameterLocation.Query,
-                        Required = false,
-                        Schema = new OpenApiSchema { Type = "string" },
-                        Description = "OData $filter"
-                    },
-                    new()
-                    {
-                        Name = "$select",
-                        In = ParameterLocation.Query,
-                        Required = false,
-                        Schema = new OpenApiSchema { Type = "string" },
-                        Description = "OData $select"
+                        ["200"] = new OpenApiResponse { Description = "Success" },
+                        ["400"] = new OpenApiResponse { Description = "Bad Request" },
+                        ["404"] = new OpenApiResponse { Description = "Not Found" },
+                        ["500"] = new OpenApiResponse { Description = "Server Error" }
                     }
-                },
-                Responses = new OpenApiResponses
-                {
-                    ["200"] = new OpenApiResponse { Description = "Success" },
-                    ["400"] = new OpenApiResponse { Description = "Bad Request" },
-                    ["404"] = new OpenApiResponse { Description = "Not Found" },
-                    ["500"] = new OpenApiResponse { Description = "Server Error" }
-                }
-            };
+                };
+                swaggerDoc.Paths[path].Operations[OperationType.Get] = getOperation;
+            }
 
-            swaggerDoc.Paths[path].Operations[OperationType.Get] = operation;
+            // Only add POST, PUT, DELETE if they are allowed and procedure is configured
+            if (procedureConfigured)
+            {
+                // Add POST operation if allowed
+                if (allowedMethods.Contains("POST"))
+                {
+                    var postOperation = new OpenApiOperation
+                    {
+                        Tags = new List<OpenApiTag> { new() { Name = endpointName } },
+                        Summary = $"INSERT new {endpointName} record",
+                        Description = $"Add a new record to {endpointName} using the configured stored procedure: {entity.Procedure}",
+                        OperationId = $"insert_{endpointName}".ToLowerInvariant(),
+                        Parameters = new List<OpenApiParameter>
+                        {
+                            new()
+                            {
+                                Name = "env",
+                                In = ParameterLocation.Path,
+                                Required = true,
+                                Schema = new OpenApiSchema
+                                {
+                                    Type = "string",
+                                    Enum = environments.Select(e => new OpenApiString(e!)).Cast<IOpenApiAny>().ToList()
+                                },
+                                Description = "Target environment"
+                            }
+                        },
+                        RequestBody = new OpenApiRequestBody
+                        {
+                            Description = "Data for the new record",
+                            Required = true,
+                            Content = new Dictionary<string, OpenApiMediaType>
+                            {
+                                ["application/json"] = new OpenApiMediaType
+                                {
+                                    Schema = new OpenApiSchema
+                                    {
+                                        Type = "object",
+                                        AdditionalProperties = new OpenApiSchema { Type = "object" }
+                                    }
+                                }
+                            }
+                        },
+                        Responses = new OpenApiResponses
+                        {
+                            ["200"] = new OpenApiResponse { Description = "Success" },
+                            ["400"] = new OpenApiResponse { Description = "Bad Request" },
+                            ["405"] = new OpenApiResponse { Description = "Method Not Allowed" },
+                            ["500"] = new OpenApiResponse { Description = "Server Error" }
+                        }
+                    };
+                    swaggerDoc.Paths[path].Operations[OperationType.Post] = postOperation;
+                }
+
+                // Add PUT operation if allowed
+                if (allowedMethods.Contains("PUT"))
+                {
+                    var putOperation = new OpenApiOperation
+                    {
+                        Tags = new List<OpenApiTag> { new() { Name = endpointName } },
+                        Summary = $"UPDATE {endpointName} record",
+                        Description = $"Update an existing record in {endpointName} using the configured stored procedure: {entity.Procedure}",
+                        OperationId = $"update_{endpointName}".ToLowerInvariant(),
+                        Parameters = new List<OpenApiParameter>
+                        {
+                            new()
+                            {
+                                Name = "env",
+                                In = ParameterLocation.Path,
+                                Required = true,
+                                Schema = new OpenApiSchema
+                                {
+                                    Type = "string",
+                                    Enum = environments.Select(e => new OpenApiString(e!)).Cast<IOpenApiAny>().ToList()
+                                },
+                                Description = "Target environment"
+                            }
+                        },
+                        RequestBody = new OpenApiRequestBody
+                        {
+                            Description = "Updated record data (must include ID/primary key)",
+                            Required = true,
+                            Content = new Dictionary<string, OpenApiMediaType>
+                            {
+                                ["application/json"] = new OpenApiMediaType
+                                {
+                                    Schema = new OpenApiSchema
+                                    {
+                                        Type = "object",
+                                        AdditionalProperties = new OpenApiSchema { Type = "object" }
+                                    }
+                                }
+                            }
+                        },
+                        Responses = new OpenApiResponses
+                        {
+                            ["200"] = new OpenApiResponse { Description = "Success" },
+                            ["400"] = new OpenApiResponse { Description = "Bad Request" },
+                            ["404"] = new OpenApiResponse { Description = "Record not found" },
+                            ["405"] = new OpenApiResponse { Description = "Method Not Allowed" },
+                            ["500"] = new OpenApiResponse { Description = "Server Error" }
+                        }
+                    };
+                    swaggerDoc.Paths[path].Operations[OperationType.Put] = putOperation;
+                }
+
+                // Add DELETE operation if allowed
+                if (allowedMethods.Contains("DELETE"))
+                {
+                    var deleteOperation = new OpenApiOperation
+                    {
+                        Tags = new List<OpenApiTag> { new() { Name = endpointName } },
+                        Summary = $"DELETE {endpointName} record",
+                        Description = $"Delete a record from {endpointName} using the configured stored procedure: {entity.Procedure}",
+                        OperationId = $"delete_{endpointName}".ToLowerInvariant(),
+                        Parameters = new List<OpenApiParameter>
+                        {
+                            new()
+                            {
+                                Name = "env",
+                                In = ParameterLocation.Path,
+                                Required = true,
+                                Schema = new OpenApiSchema
+                                {
+                                    Type = "string",
+                                    Enum = environments.Select(e => new OpenApiString(e!)).Cast<IOpenApiAny>().ToList()
+                                },
+                                Description = "Target environment"
+                            },
+                            new()
+                            {
+                                Name = "id",
+                                In = ParameterLocation.Query,
+                                Required = true,
+                                Schema = new OpenApiSchema { Type = "string" },
+                                Description = "Primary key/ID of record to delete"
+                            }
+                        },
+                        Responses = new OpenApiResponses
+                        {
+                            ["200"] = new OpenApiResponse { Description = "Success" },
+                            ["400"] = new OpenApiResponse { Description = "Bad Request" },
+                            ["404"] = new OpenApiResponse { Description = "Record not found" },
+                            ["405"] = new OpenApiResponse { Description = "Method Not Allowed" },
+                            ["500"] = new OpenApiResponse { Description = "Server Error" }
+                        }
+                    };
+                    swaggerDoc.Paths[path].Operations[OperationType.Delete] = deleteOperation;
+                }
+            }
         }
     }
 

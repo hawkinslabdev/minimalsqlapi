@@ -26,7 +26,8 @@ public static class EndpointHelper
                     return new EndpointEntity
                     {
                         DatabaseObjectName = "DefaultWebhooksHandler", // Placeholder
-                        DatabaseSchema = "dbo" // Default schema
+                        DatabaseSchema = "dbo", // Default schema
+                        AllowedMethods = new List<string> { "POST" } // Webhooks only support POST
                     };
                 }
 
@@ -46,7 +47,8 @@ public static class EndpointHelper
                     return new EndpointEntity
                     {
                         DatabaseObjectName = "DefaultWebhooksHandler", // Placeholder
-                        DatabaseSchema = "dbo" // Default schema
+                        DatabaseSchema = "dbo", // Default schema
+                        AllowedMethods = new List<string> { "POST" } // Webhooks only support POST
                     };
                 }
 
@@ -57,10 +59,65 @@ public static class EndpointHelper
             // Default settings for other endpoints
             entity.DatabaseSchema ??= "dbo";
 
+            // Set default AllowedMethods if not provided
+            if (entity.AllowedMethods == null || entity.AllowedMethods.Count == 0)
+            {
+                // If procedure is configured, allow all methods by default
+                if (!string.IsNullOrEmpty(entity.Procedure))
+                {
+                    entity.AllowedMethods = new List<string> { "GET", "POST", "PUT", "DELETE" };
+                }
+                else
+                {
+                    // If no procedure, only allow GET
+                    entity.AllowedMethods = new List<string> { "GET" };
+                }
+            }
+            else
+            {
+                // Normalize method names to uppercase
+                entity.AllowedMethods = entity.AllowedMethods.Select(m => m.ToUpper()).ToList();
+                
+                // Validate the methods
+                var validMethods = new[] { "GET", "POST", "PUT", "DELETE" };
+                var invalidMethods = entity.AllowedMethods.Where(m => !validMethods.Contains(m)).ToList();
+                
+                if (invalidMethods.Any())
+                {
+                    Log.Warning("⚠️ Invalid HTTP methods in endpoint {Endpoint}: {Methods}", 
+                        endpoint, string.Join(", ", invalidMethods));
+                    
+                    // Remove invalid methods
+                    entity.AllowedMethods = entity.AllowedMethods
+                        .Where(m => validMethods.Contains(m))
+                        .ToList();
+                }
+                
+                // Ensure a procedure is configured for non-GET methods
+                var writeMethods = entity.AllowedMethods.Where(m => m != "GET").ToList();
+                if (writeMethods.Any() && string.IsNullOrEmpty(entity.Procedure))
+                {
+                    Log.Warning("⚠️ Endpoint {Endpoint} allows write methods {Methods} but has no procedure configured. These methods will be disabled.", 
+                        endpoint, string.Join(", ", writeMethods));
+                    
+                    // Remove write methods if no procedure is configured
+                    entity.AllowedMethods = entity.AllowedMethods
+                        .Where(m => m == "GET")
+                        .ToList();
+                }
+            }
+
             // Skip AllowedColumns handling for Webhooks
             if (!endpoint.Equals("Webhooks", StringComparison.OrdinalIgnoreCase))
             {
                 entity.AllowedColumns ??= new List<string>();
+            }
+
+            // Log if this endpoint has a procedure configured
+            if (!string.IsNullOrEmpty(entity.Procedure))
+            {
+                Log.Debug("🔄 Endpoint '{Endpoint}' has procedure configured: {Procedure}, methods: {Methods}", 
+                    endpoint, entity.Procedure, string.Join(", ", entity.AllowedMethods));
             }
 
             return entity;
@@ -96,13 +153,16 @@ public static class EndpointHelper
                 endpointMap[endpointName] = entity;
 
                 if(!silent) {
-                    Log.Information("📦 Loaded endpoint '{Endpoint}': {Schema}.{Object} ({Columns})",
+                    Log.Information("📦 Loaded endpoint '{Endpoint}': {Schema}.{Object} ({Columns}){Procedure}",
                         endpointName,
                         entity.DatabaseSchema,
                         entity.DatabaseObjectName,
                         (entity.AllowedColumns?.Count ?? 0) > 0
                             ? string.Join(", ", entity.AllowedColumns!)
-                            : "ALL columns");
+                            : "ALL columns",
+                        !string.IsNullOrEmpty(entity.Procedure)
+                            ? $", Procedure: {entity.Procedure}"
+                            : "");
                 };
             }
         }
@@ -119,4 +179,6 @@ public class EndpointEntity
     public string? DatabaseObjectName { get; set; }
     public string? DatabaseSchema { get; set; }
     public List<string>? AllowedColumns { get; set; }
+    public string? Procedure { get; set; }
+    public List<string>? AllowedMethods { get; set; }
 }

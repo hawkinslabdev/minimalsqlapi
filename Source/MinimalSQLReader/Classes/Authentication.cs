@@ -10,7 +10,7 @@ public class TokenAuthMiddleware
     private readonly RequestDelegate _next;
 
     public TokenAuthMiddleware(RequestDelegate next)
-    {s
+    {
         _next = next;
     }
 

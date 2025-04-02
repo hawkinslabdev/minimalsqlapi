@@ -5,6 +5,8 @@ using Dapper;
 using Flurl;
 using MinimalSqlReader.Classes;
 using Serilog;
+using System.Text.Json;
+using System.Data;
 
 namespace MinimalSqlReader.Controllers;
 
@@ -37,23 +39,33 @@ public class DatabaseObjectsController : ControllerBase
 
         try
         {
-            // Validate environment and connection string
+            // Step 1: Validate environment
             if (!_environmentSettings.TryLoadEnvironment(env, out var connectionString, out var serverName) || 
                 string.IsNullOrEmpty(connectionString))
             {
                 return BadRequest(new { error = $"Invalid or missing environment: {env}" });
             }
 
-            // Validate endpoint
+            // Step 2: Validate endpoint
             var endpointInfo = ValidateAndExtractEndpoint(endpointPath, out var errorResult);
             if (errorResult != null)
             {
                 return errorResult;
             }
 
-            var (schema, objectName, allowedColumns) = endpointInfo!.Value;
+            // Step 3: Extract endpoint details
+            var schema = endpointInfo!.Value.Schema;
+            var objectName = endpointInfo.Value.ObjectName;
+            var allowedColumns = endpointInfo.Value.AllowedColumns;
+            var allowedMethods = endpointInfo.Value.AllowedMethods;
 
-            // Load columns if needed
+            // Step 4: Check if GET is allowed
+            if (!allowedMethods.Contains("GET"))
+            {
+                return MethodNotAllowed("GET", endpointPath);
+            }
+
+            // Step 5: Load columns if needed
             if (allowedColumns.Count == 0)
             {
                 allowedColumns = await LoadColumnsFromDatabaseAsync(schema, objectName, connectionString);
@@ -66,7 +78,7 @@ public class DatabaseObjectsController : ControllerBase
                 }
             }
 
-            // Validate column names for OData compatibility
+            // Step 6: Validate column names
             var invalidColumns = allowedColumns.Where(c => c.Contains(' ')).ToList();
             if (invalidColumns.Any())
             {
@@ -75,23 +87,46 @@ public class DatabaseObjectsController : ControllerBase
                 throw new InvalidOperationException("Invalid entity. Column names must not contain spaces.");
             }
 
-            // Build OData parameters
-            var odataParams = BuildODataParameters(top, skip, select, filter, orderby);
+            // Step 7 Validate and process select parameter to enforce AllowedColumns
+            if (!string.IsNullOrEmpty(select))
+            {
+                // Parse selected columns and check if they're allowed
+                var selectedColumns = select.Split(',')
+                    .Select(c => c.Trim())
+                    .ToList();
+                
+                var invalidSelectedColumns = selectedColumns
+                    .Where(col => !allowedColumns.Contains(col, StringComparer.OrdinalIgnoreCase))
+                    .ToList();
+                
+                if (invalidSelectedColumns.Any())
+                {
+                    var msg = $"❌ Selected columns not allowed: {string.Join(", ", invalidSelectedColumns)}";
+                    Log.Warning(msg);
+                    return BadRequest(new { error = $"One or more columns are not allowed: {string.Join(", ", invalidSelectedColumns)}" });
+                }
+            }
+            else if (allowedColumns.Count > 0)
+            {
+                // No select provided but we have allowed columns - restrict to those columns
+                select = string.Join(",", allowedColumns);
+                Log.Debug("🔒 No $select provided, restricting to allowed columns: {Columns}", select);
+            }
 
-            // Convert OData to SQL and sanitize
+            // Step 8: Build and execute query
+            var odataParams = BuildODataParameters(top, skip, select, filter, orderby);
             var (query, parameters) = _oDataToSqlConverter.ConvertToSQL($"{schema}.{objectName}", odataParams);
             query = SanitizeSqlQuery(query, schema, objectName);
-
-            // Execute query
             var (rows, isLastPage) = await ExecuteQueryAsync(connectionString, query, parameters, top);
 
-            // Build and return result
+            // Step 9: Build result
             var result = BuildResult(rows, isLastPage, top, env, endpointPath, 
                 Request.Query.ContainsKey("$select") ? select : null, filter, orderby, skip);
 
             Log.Debug("📡 Querying {env}:{schema}.{object} with {select} -> rows: {count}", 
                 env, schema, objectName, select ?? "all columns", isLastPage ? rows.Count : rows.Count - 1);
 
+            // Step 10: Return success
             return Ok(result);
         }
         catch (SqlException ex)
@@ -106,7 +141,351 @@ public class DatabaseObjectsController : ControllerBase
         }
     }
 
-    private (string Schema, string ObjectName, List<string> AllowedColumns)? ValidateAndExtractEndpoint(
+    [HttpPost(Name = "InsertRecord")]
+    public async Task<IActionResult> InsertAsync(
+        string env,
+        string endpointPath,
+        [FromBody] JsonElement data)
+    {
+        var url = $"{Request.Scheme}://{Request.Host}{Request.Path}";
+        Log.Information("📥 POST Request received: {Method} {Url}", Request.Method, url);
+
+        // Validate endpoint and check if POST is allowed
+        var endpointInfo = ValidateAndExtractEndpoint(endpointPath, out var errorResult);
+        if (errorResult != null)
+        {
+            return errorResult;
+        }
+
+        var (_, _, _, procedure, allowedMethods) = endpointInfo!.Value;
+
+        // Check if POST is allowed for this endpoint
+        if (!allowedMethods.Contains("POST"))
+        {
+            return MethodNotAllowed("POST", endpointPath);
+        }
+
+        // Check if procedure is configured
+        if (string.IsNullOrEmpty(procedure))
+        {
+            return BadRequest(new { error = $"Endpoint '{endpointPath}' has POST enabled but no procedure configured." });
+        }
+
+        return await ExecuteProcedureAsync(env, endpointPath, data, "INSERT");
+    }
+
+    [HttpPut(Name = "UpdateRecord")]
+    public async Task<IActionResult> UpdateAsync(
+        string env,
+        string endpointPath,
+        [FromBody] JsonElement data)
+    {
+        var url = $"{Request.Scheme}://{Request.Host}{Request.Path}";
+        Log.Information("📥 PUT Request received: {Method} {Url}", Request.Method, url);
+
+        // Validate endpoint and check if PUT is allowed
+        var endpointInfo = ValidateAndExtractEndpoint(endpointPath, out var errorResult);
+        if (errorResult != null)
+        {
+            return errorResult;
+        }
+
+        var (_, _, _, procedure, allowedMethods) = endpointInfo!.Value;
+
+        // Check if PUT is allowed for this endpoint
+        if (!allowedMethods.Contains("PUT"))
+        {
+            return MethodNotAllowed("PUT", endpointPath);
+        }
+
+        // Check if procedure is configured
+        if (string.IsNullOrEmpty(procedure))
+        {
+            return BadRequest(new { error = $"Endpoint '{endpointPath}' has PUT enabled but no procedure configured." });
+        }
+
+        return await ExecuteProcedureAsync(env, endpointPath, data, "UPDATE");
+    }
+
+    [HttpDelete(Name = "DeleteRecord")]
+    public async Task<IActionResult> DeleteAsync(
+        string env,
+        string endpointPath,
+        [FromQuery] string id)
+    {
+        var url = $"{Request.Scheme}://{Request.Host}{Request.Path}{Request.QueryString}";
+        Log.Information("📥 DELETE Request received: {Method} {Url}", Request.Method, url);
+
+        // Validate endpoint and check if DELETE is allowed
+        var endpointInfo = ValidateAndExtractEndpoint(endpointPath, out var errorResult);
+        if (errorResult != null)
+        {
+            return errorResult;
+        }
+
+        var (_, _, _, procedure, allowedMethods) = endpointInfo!.Value;
+
+        // Check if DELETE is allowed for this endpoint
+        if (!allowedMethods.Contains("DELETE"))
+        {
+            return MethodNotAllowed("DELETE", endpointPath);
+        }
+
+        // Check if procedure is configured
+        if (string.IsNullOrEmpty(procedure))
+        {
+            return BadRequest(new { error = $"Endpoint '{endpointPath}' has DELETE enabled but no procedure configured." });
+        }
+
+        // For DELETE, we create a simple object with just the ID
+        var data = new { id };
+        // Convert to JsonElement
+        var jsonData = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(data));
+        
+        return await ExecuteProcedureAsync(env, endpointPath, jsonData, "DELETE");
+    }
+
+    private IActionResult MethodNotAllowed(string method, string endpointPath)
+    {
+        var message = $"HTTP {method} method is not allowed for endpoint '{endpointPath}'";
+        Log.Warning("⚠️ {Message}", message);
+        return StatusCode(405, new { error = message });
+    }
+
+    private async Task<IActionResult> ExecuteProcedureAsync(
+        string env,
+        string endpointPath,
+        object data,
+        string method)
+    {
+        try
+        {
+            // Validate environment and connection string
+            if (!_environmentSettings.TryLoadEnvironment(env, out var connectionString, out var serverName) || 
+                string.IsNullOrEmpty(connectionString))
+            {
+                return BadRequest(new { error = $"Invalid or missing environment: {env}" });
+            }
+
+            // Validate endpoint
+            var endpointInfo = ValidateAndExtractEndpoint(endpointPath, out var errorResult);
+            if (errorResult != null)
+            {
+                return errorResult;
+            }
+
+            var (schema, objectName, _, procedureName, allowedMethods) = endpointInfo!.Value;
+
+            // Check if method is allowed
+            if (!allowedMethods.Contains(method == "INSERT" ? "POST" : 
+                                        method == "UPDATE" ? "PUT" : 
+                                        method == "DELETE" ? "DELETE" : "GET"))
+            {
+                return MethodNotAllowed(method, endpointPath);
+            }
+
+            // Check if procedure is configured
+            if (string.IsNullOrEmpty(procedureName))
+            {
+                return BadRequest(new { error = $"No procedure configured for endpoint: {endpointPath}" });
+            }
+
+            // Split the procedure name into schema and name parts
+            var procedureParts = procedureName.Split('.');
+            if (procedureParts.Length != 2)
+            {
+                return BadRequest(new { error = $"Invalid procedure format. Expected 'schema.procedureName', got: {procedureName}" });
+            }
+
+            var procedureSchema = procedureParts[0].Trim('[', ']');
+            var procedureObjectName = procedureParts[1].Trim('[', ']');
+
+            // Convert data to parameters
+            var parameters = ConvertToParameters(data);
+            
+            // Add Method parameter if not already included
+            if (!parameters.ParameterNames.Any(p => p.Equals("@Method", StringComparison.OrdinalIgnoreCase)))
+            {
+                parameters.Add("@Method", method);
+            }
+
+            // Call the stored procedure
+            Log.Debug("📡 Executing procedure {schema}.{procedure} with method {method}", 
+                procedureSchema, procedureObjectName, method);
+
+            // Execute the stored procedure
+            var result = await ExecuteStoredProcedureAsync(
+                connectionString, 
+                procedureSchema, 
+                procedureObjectName, 
+                parameters);
+
+            return Ok(new { 
+                success = true, 
+                message = $"{method} operation completed successfully", 
+                result 
+            });
+        }
+        catch (SqlException ex)
+        {
+            Log.Error(ex, "❌ SQL error while executing procedure for {env}:{endpointPath}", env, endpointPath);
+            return StatusCode(500, new { error = $"Database error: {ex.Message}" });
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "❌ Unexpected error while executing procedure for {env}:{endpointPath}", env, endpointPath);
+            return StatusCode(500, new { error = $"Unexpected error: {ex.Message}" });
+        }
+    }
+
+    private DynamicParameters ConvertToParameters(object data)
+    {
+        var parameters = new DynamicParameters();
+        
+        // Try to convert the object to a dictionary
+        try {
+            if (data is JsonElement jsonElement)
+            {
+                // Handle JsonElement directly
+                if (jsonElement.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var property in jsonElement.EnumerateObject())
+                    {
+                        var paramName = $"@{property.Name}";
+                        
+                        if (property.Value.ValueKind == JsonValueKind.Null)
+                        {
+                            parameters.Add(paramName, null);
+                        }
+                        else if (property.Value.ValueKind == JsonValueKind.String)
+                        {
+                            parameters.Add(paramName, property.Value.GetString());
+                        }
+                        else if (property.Value.ValueKind == JsonValueKind.Number)
+                        {
+                            // Check if it's an integer or decimal
+                            if (property.Value.TryGetInt32(out int intValue))
+                            {
+                                parameters.Add(paramName, intValue);
+                            }
+                            else if (property.Value.TryGetInt64(out long longValue))
+                            {
+                                parameters.Add(paramName, longValue);
+                            }
+                            else if (property.Value.TryGetDouble(out double doubleValue))
+                            {
+                                parameters.Add(paramName, doubleValue);
+                            }
+                            else if (property.Value.TryGetDecimal(out decimal decimalValue))
+                            {
+                                parameters.Add(paramName, decimalValue);
+                            }
+                        }
+                        else if (property.Value.ValueKind == JsonValueKind.True || 
+                                property.Value.ValueKind == JsonValueKind.False)
+                        {
+                            parameters.Add(paramName, property.Value.GetBoolean());
+                        }
+                        else if (property.Value.ValueKind == JsonValueKind.Array)
+                        {
+                            // Convert array to string for simplicity
+                            parameters.Add(paramName, property.Value.ToString());
+                        }
+                        else
+                        {
+                            // For other types, convert to string
+                            parameters.Add(paramName, property.Value.ToString());
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // For non-JsonElement objects, serialize and deserialize
+                var json = JsonSerializer.Serialize(data);
+                var dictionary = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+
+                if (dictionary != null)
+                {
+                    foreach (var kvp in dictionary)
+                    {
+                        var paramName = $"@{kvp.Key}";
+                        
+                        if (kvp.Value.ValueKind == JsonValueKind.Null)
+                        {
+                            parameters.Add(paramName, null);
+                        }
+                        else if (kvp.Value.ValueKind == JsonValueKind.String)
+                        {
+                            parameters.Add(paramName, kvp.Value.GetString());
+                        }
+                        else if (kvp.Value.ValueKind == JsonValueKind.Number)
+                        {
+                            // Check if it's an integer or decimal
+                            if (kvp.Value.TryGetInt32(out int intValue))
+                            {
+                                parameters.Add(paramName, intValue);
+                            }
+                            else if (kvp.Value.TryGetInt64(out long longValue))
+                            {
+                                parameters.Add(paramName, longValue);
+                            }
+                            else if (kvp.Value.TryGetDouble(out double doubleValue))
+                            {
+                                parameters.Add(paramName, doubleValue);
+                            }
+                            else if (kvp.Value.TryGetDecimal(out decimal decimalValue))
+                            {
+                                parameters.Add(paramName, decimalValue);
+                            }
+                        }
+                        else if (kvp.Value.ValueKind == JsonValueKind.True || 
+                                kvp.Value.ValueKind == JsonValueKind.False)
+                        {
+                            parameters.Add(paramName, kvp.Value.GetBoolean());
+                        }
+                        else if (kvp.Value.ValueKind == JsonValueKind.Array)
+                        {
+                            // Convert array to string for simplicity
+                            parameters.Add(paramName, kvp.Value.ToString());
+                        }
+                        else
+                        {
+                            // For other types, convert to string
+                            parameters.Add(paramName, kvp.Value.ToString());
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "❌ Error converting parameters: {ErrorMessage}", ex.Message);
+            throw new InvalidOperationException($"Error converting parameters: {ex.Message}", ex);
+        }
+
+        return parameters;
+    }
+
+    private async Task<object> ExecuteStoredProcedureAsync(
+        string connectionString,
+        string schema,
+        string procedureName,
+        DynamicParameters parameters)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync();
+
+        // Execute the stored procedure
+        var result = await conn.QueryAsync<dynamic>(
+            $"[{schema}].[{procedureName}]", 
+            parameters, 
+            commandType: CommandType.StoredProcedure);
+
+        return result;
+    }
+
+    private (string Schema, string ObjectName, List<string> AllowedColumns, string? ProcedureName, List<string> AllowedMethods)? ValidateAndExtractEndpoint(
         string endpointPath, 
         out IActionResult? errorResult)
     {
@@ -146,7 +525,13 @@ public class DatabaseObjectsController : ControllerBase
         
         var allowedColumns = endpointEntity.AllowedColumns ?? new List<string>();
         
-        return (schema, objectName, allowedColumns);
+        // Get the stored procedure name if it exists
+        var procedureName = endpointEntity.Procedure;
+        
+        // Get allowed methods
+        var allowedMethods = endpointEntity.AllowedMethods ?? new List<string> { "GET" };
+        
+        return (schema, objectName, allowedColumns, procedureName, allowedMethods);
     }
 
     private Dictionary<string, string> BuildODataParameters(

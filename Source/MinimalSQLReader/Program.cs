@@ -79,7 +79,7 @@ using (var scope = app.Services.CreateScope())
         {
             string username = Environment.MachineName;
             var token = await tokenService.GenerateTokenAsync(username);
-            Log.Debug("🗝️ Generated token for {Username}: {Token}", username, token);
+            Log.Information("🗝️ Generated token for {Username}: {Token}", username, token);
             Log.Information("💾 Token saved to: {Path}", Path.Combine(Directory.GetCurrentDirectory(), "tokens", $"{username}.txt"));
         }
     }
