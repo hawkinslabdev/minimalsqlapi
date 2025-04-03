@@ -43,7 +43,7 @@ public class DatabaseObjectsController : ControllerBase
             if (!_environmentSettings.TryLoadEnvironment(env, out var connectionString, out var serverName) || 
                 string.IsNullOrEmpty(connectionString))
             {
-                return BadRequest(new { error = $"Invalid or missing environment: {env}" });
+                return BadRequest(new { error = $"Invalid or missing environment: {env}", success = false });
             }
 
             // Step 2: Validate endpoint
@@ -74,7 +74,7 @@ public class DatabaseObjectsController : ControllerBase
                 {
                     var msg = $"❌ No columns found for {schema}.{objectName}. Please verify the object exists and is accessible.";
                     Log.Error(msg);
-                    return StatusCode(500, new { error = "Invalid entity. Object definition not correct." });
+                    return StatusCode(500, new { error = "Invalid entity. Object definition not correct.", success = false });
                 }
             }
 
@@ -234,7 +234,7 @@ public class DatabaseObjectsController : ControllerBase
         // Check if procedure is configured
         if (string.IsNullOrEmpty(procedure))
         {
-            return BadRequest(new { error = $"Endpoint '{endpointPath}' has DELETE enabled but no procedure configured." });
+            return BadRequest(new { error = $"Endpoint '{endpointPath}' has DELETE enabled isn't configured.", success = false });
         }
 
         // For DELETE, we create a simple object with just the ID
@@ -249,7 +249,7 @@ public class DatabaseObjectsController : ControllerBase
     {
         var message = $"HTTP {method} method is not allowed for endpoint '{endpointPath}'";
         Log.Warning("⚠️ {Message}", message);
-        return StatusCode(405, new { error = message });
+        return StatusCode(405, new { error = message, success = false });
     }
 
     private async Task<IActionResult> ExecuteProcedureAsync(
@@ -264,7 +264,7 @@ public class DatabaseObjectsController : ControllerBase
             if (!_environmentSettings.TryLoadEnvironment(env, out var connectionString, out var serverName) || 
                 string.IsNullOrEmpty(connectionString))
             {
-                return BadRequest(new { error = $"Invalid or missing environment: {env}" });
+                return BadRequest(new { error = $"Invalid or missing environment: {env}", success = false });
             }
 
             // Validate endpoint
@@ -287,14 +287,14 @@ public class DatabaseObjectsController : ControllerBase
             // Check if procedure is configured
             if (string.IsNullOrEmpty(procedureName))
             {
-                return BadRequest(new { error = $"No procedure configured for endpoint: {endpointPath}" });
+                return BadRequest(new { error = $"No procedure configured for endpoint: {endpointPath}", success = false });
             }
 
             // Split the procedure name into schema and name parts
             var procedureParts = procedureName.Split('.');
             if (procedureParts.Length != 2)
             {
-                return BadRequest(new { error = $"Invalid procedure format. Expected 'schema.procedureName', got: {procedureName}" });
+                return BadRequest(new { error = $"Invalid procedure format. Expected 'schema.procedureName', got: {procedureName}", success = false });
             }
 
             var procedureSchema = procedureParts[0].Trim('[', ']');
@@ -329,12 +329,12 @@ public class DatabaseObjectsController : ControllerBase
         catch (SqlException ex)
         {
             Log.Error(ex, "❌ SQL error while executing procedure for {env}:{endpointPath}", env, endpointPath);
-            return StatusCode(500, new { error = $"Database error: {ex.Message}" });
+            return StatusCode(500, new { error = $"Database error: {ex.Message}", success = false });
         }
         catch (Exception ex)
         {
             Log.Error(ex, "❌ Unexpected error while executing procedure for {env}:{endpointPath}", env, endpointPath);
-            return StatusCode(500, new { error = $"Unexpected error: {ex.Message}" });
+            return StatusCode(500, new { error = $"Unexpected error: {ex.Message}", success = false });
         }
     }
 
@@ -494,7 +494,7 @@ public class DatabaseObjectsController : ControllerBase
         // Validate endpoint path
         if (string.IsNullOrWhiteSpace(endpointPath))
         {
-            errorResult = BadRequest(new { error = "Missing endpoint path in the request." });
+            errorResult = BadRequest(new { error = "Missing endpoint path in the request.", success = false });
             return null;
         }
 
@@ -502,7 +502,7 @@ public class DatabaseObjectsController : ControllerBase
         var endpointParts = endpointPath.Split('/');
         if (endpointParts.Length == 0)
         {
-            errorResult = BadRequest(new { error = "Invalid endpoint format." });
+            errorResult = BadRequest(new { error = "Invalid endpoint format.", success = false });
             return null;
         }
 
@@ -510,7 +510,7 @@ public class DatabaseObjectsController : ControllerBase
         var endpointEntity = EndpointHelper.LoadEndpoint(endpointName);
         if (endpointEntity == null)
         {
-            errorResult = NotFound(new { error = $"Endpoint '{endpointName}' not found." });
+            errorResult = NotFound(new { error = $"Endpoint '{endpointName}' not found.", success = false });
             return null;
         }
 
@@ -556,7 +556,6 @@ public class DatabaseObjectsController : ControllerBase
 
     private string SanitizeSqlQuery(string query, string schema, string objectName)
     {
-        // Replace FROM [dbo].[Table] => FROM [dbo].[Table] WITH (NOLOCK)
         var fromPattern = $"FROM [{schema}].[{objectName}]";
         var fromWithNoLock = $"{fromPattern} WITH (NOLOCK)";
         return query.Replace(fromPattern, fromWithNoLock, StringComparison.InvariantCultureIgnoreCase);

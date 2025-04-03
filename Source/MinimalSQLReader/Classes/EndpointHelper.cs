@@ -25,9 +25,9 @@ public static class EndpointHelper
                     Log.Warning("⚠️ entity.json not found for Webhooks, loading default configuration.");
                     return new EndpointEntity
                     {
-                        DatabaseObjectName = "DefaultWebhooksHandler", // Placeholder
-                        DatabaseSchema = "dbo", // Default schema
-                        AllowedMethods = new List<string> { "POST" } // Webhooks only support POST
+                        DatabaseObjectName = "DefaultWebhooksHandler", 
+                        DatabaseSchema = "dbo",
+                        AllowedMethods = new List<string> { "POST" } 
                     };
                 }
 
@@ -46,9 +46,9 @@ public static class EndpointHelper
                     Log.Warning("⚠️ Invalid or missing DatabaseObjectName for Webhooks, using default configuration.");
                     return new EndpointEntity
                     {
-                        DatabaseObjectName = "DefaultWebhooksHandler", // Placeholder
-                        DatabaseSchema = "dbo", // Default schema
-                        AllowedMethods = new List<string> { "POST" } // Webhooks only support POST
+                        DatabaseObjectName = "DefaultWebhooksHandler", 
+                        DatabaseSchema = "dbo", 
+                        AllowedMethods = new List<string> { "POST" }
                     };
                 }
 

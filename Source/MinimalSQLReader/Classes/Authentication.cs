@@ -18,12 +18,14 @@ public class TokenAuthMiddleware
     {
         var path = context.Request.Path.ToString().ToLower();
 
+        // Skip authentication for Swagger and index
         if (path.StartsWith("/swagger") || path == "/index.html")
         {
             await _next(context);
             return;
         }
 
+        // Check authorization header
         if (!context.Request.Headers.TryGetValue("Authorization", out var authHeader) || !authHeader.ToString().StartsWith("Bearer "))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -32,24 +34,26 @@ public class TokenAuthMiddleware
 
             await context.Response.WriteAsync(JsonSerializer.Serialize(new
             {
-                error = "Invalid authentication header"
+                error = "Invalid authentication header",
+                success = false
             }));
             return;
         }
 
         var token = authHeader.ToString().Substring("Bearer ".Length).Trim();
 
-        
-        bool isValid = await tokenService.VerifyTokenAsync(token);
-        if (!isValid)
+        // Validate token using the TokenService
+        bool isValidToken = await tokenService.VerifyTokenAsync(token);
+        if (!isValidToken)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             context.Response.ContentType = "application/json";
-            Log.Warning("❌ Invalid token");
+            Log.Warning("❌ Invalid token: {TokenPrefix}", token.Substring(0, Math.Min(8, token.Length)));
 
             await context.Response.WriteAsync(JsonSerializer.Serialize(new
             {
-                error = "Invalid token"
+                error = "Invalid token",
+                success = false
             }));
             return;
         }

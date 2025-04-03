@@ -49,7 +49,6 @@ builder.Services.AddScoped<TokenService>();
 
 var swaggerSettings = SwaggerConfiguration.ConfigureSwagger(builder);
 
-// Configure SQLite Authentication Database
 var dbPath = Path.Combine(Directory.GetCurrentDirectory(), "auth.db");
 builder.Services.AddDbContext<AuthDbContext>(options =>
     options.UseSqlite("Data Source=auth.db"));
@@ -118,8 +117,34 @@ app.Use(async (context, next) =>
         await context.Response.WriteAsync(JsonSerializer.Serialize(errorResponse));
     }
 });
+app.UseStatusCodePages(async context =>
+{
+    var response = context.HttpContext.Response;
+    response.ContentType = "application/json";
 
-app.UseMiddleware<TokenAuthMiddleware>();
+    string message = response.StatusCode switch
+    {
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        406 => "Not Acceptable",
+        415 => "Unsupported Media Type",
+        422 => "Unprocessable Entity",
+        500 => "Internal Server Error",
+        _   => "Unexpected Error"
+    };
+
+    Log.Warning("HTTP {StatusCode}: {Message} - {Method} {Path}", 
+        response.StatusCode, message, context.HttpContext.Request.Method, context.HttpContext.Request.Path);
+
+    var json = JsonSerializer.Serialize(new { error = message, success = false, statusCode = response.StatusCode });
+    await response.WriteAsync(json);
+});
+
+
+app.UseMiddleware<RateLimiter>();
 app.UseAuthorization();
 app.MapControllers();
 

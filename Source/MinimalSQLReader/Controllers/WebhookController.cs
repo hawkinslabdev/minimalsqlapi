@@ -34,19 +34,19 @@ public class WebhookController : ControllerBase
             // Validate environment
             if (!_environmentSettings.TryLoadEnvironment(env, out var connectionString, out var serverName))
             {
-                return BadRequest(new { error = $"Environment '{env}' is invalid or missing." });
+                return BadRequest(new { error = $"Environment '{env}' is invalid or missing.", success = false });
             }
 
             if (string.IsNullOrWhiteSpace(connectionString))
             {
-                return BadRequest(new { error = "Database connection string is invalid or missing." });
+                return BadRequest(new { error = "Database connection string is invalid or missing.", success = false });
             }
 
             // Load and validate endpoint configuration
             var endpointConfig = GetEndpointConfiguration("Webhooks");
             if (endpointConfig == null)
             {
-                return NotFound(new { error = "Webhooks endpoint is not configured properly." });
+                return NotFound(new { error = "Webhooks endpoint is not configured properly.", success = false });
             }
 
             // Get table name and schema from the configuration
@@ -56,7 +56,7 @@ public class WebhookController : ControllerBase
             if (string.IsNullOrWhiteSpace(tableName))
             {
                 Log.Warning("❌ Table name is missing in the configuration.");
-                return BadRequest(new { error = "Table name is missing in the configuration." });
+                return BadRequest(new { error = "Table name is missing in the configuration.", success = false });
             }
 
             // Validate webhook ID - Fixed the LINQ issue with AllowedColumns
@@ -67,14 +67,14 @@ public class WebhookController : ControllerBase
                 var allowedList = string.Join(", ", allowedColumns.Select(c => c.ToString()));
                 Log.Warning("❌ Webhook ID '{WebhookId}' is not in the allowed list: {AllowedWebhooks}",
                     webhookId, allowedList);
-                return NotFound(new { error = $"Webhook ID '{webhookId}' is not configured." });
+                return NotFound(new { error = $"Webhook ID '{webhookId}' is not configured.", success = false });
             }
 
             // Validate schema and table names to prevent SQL injection
             if (!IsValidSqlIdentifier(schema) || !IsValidSqlIdentifier(tableName))
             {
                 Log.Warning("❌ Invalid schema or table name: {Schema}.{TableName}", schema, tableName);
-                return BadRequest(new { error = "Invalid schema or table name." });
+                return BadRequest(new { error = "Invalid schema or table name.", success = false });
             }
 
             // Ensure table exists and insert data
@@ -91,12 +91,12 @@ public class WebhookController : ControllerBase
         catch (SqlException ex) when (ex.Message.Contains("Timeout expired"))
         {
             Log.Error(ex, "❌ Database timeout error occurred");
-            return StatusCode(503, new { error = "Database timeout occurred. Please try again later." });
+            return StatusCode(503, new { error = "Database timeout occurred. Please try again later.", success = false });
         }
         catch (Exception ex)
         {
             Log.Error(ex, "❌ Error processing webhook {WebhookId}", webhookId);
-            return StatusCode(500, new { error = "An error occurred while processing the webhook." });
+            return StatusCode(500, new { error = "An error occurred while processing the webhook.", success = false });
         }
     }
 
