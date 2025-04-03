@@ -48,23 +48,28 @@ jobs:
         # Use Python to increment the version
         VERSION=$(python -c "
         import semver
+        import datetime
         
         # Parse the current version
         current_version = semver.VersionInfo.parse('$LATEST_TAG')
         
+        # Get current year and month
+        current_year = datetime.datetime.now().year
+        current_month = datetime.datetime.now().month
+        
         # Increment based on input
         if '${{ github.event.inputs.release_type }}' == 'major':
-            new_version = current_version.bump_major()
+            # For major release, create a new version with the current year and month
+            new_version = semver.VersionInfo(current_year, current_month, 0)
         elif '${{ github.event.inputs.release_type }}' == 'minor':
+            # For minor release, bump the minor version
             new_version = current_version.bump_minor()
         else:
+            # For patch, bump the patch version
             new_version = current_version.bump_patch()
         
         # Format as YYYY.month.version
-        import datetime
-        current_year = datetime.datetime.now().year
-        current_month = datetime.datetime.now().month
-        print(f'{current_year}.{current_month}.{new_version.patch}')
+        print(f'{new_version.major}.{new_version.minor}.{new_version.patch}')
         ")
         
         echo "NEW_VERSION=$VERSION" >> $GITHUB_OUTPUT
