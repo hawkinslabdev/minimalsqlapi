@@ -1,12 +1,14 @@
 # ✨ Minimal SQL Server API
 
-A dynamic, environment-aware SQL Server API for Internet Information Services. Built on .NET (ASP.NET Core), featuring secure bearer token authentication, endpoint mapping via JSON configuration files, and Serilog-powered logging. Supports SQL Server and enables flexible query generation using OData syntax. It supports CRUD, including a generic POST-route for webhook-like functionality.
+A dynamic, environment-aware SQL Server API for Internet Information Services. Now with CRUD-support!
+
+Lightweight and tuilt on .NET (ASP.NET Core), featuring secure bearer token authentication, endpoint mapping via JSON configuration files, and Serilog-powered logging. Solely supports SQL Server and enables flexible query generation using OData syntax.
 
 ![Screenshot of Swagger UI](https://raw.githubusercontent.com/hawkinslabdev/minimalsqlreader/refs/heads/main/Source/example.png)
 
 ## 🚀 Features
 - Environment-aware SQL database routing
-- Secure authentication
+- Secure authentication, with optional Azure Key Vault support
 - JSON-configured endpoints
 - SQL execution for HTTP methods with granular control (GET/POST/MERGE/DELETE)
 - Stored procedure support for data manipulation
@@ -14,7 +16,7 @@ A dynamic, environment-aware SQL Server API for Internet Information Services. B
 - Serilog-powered logging with daily rotation
 
 ## 🗺️ Roadmap
-- [ ] Implement secret management for Azure Key Vault and HashiCorp Vault
+- [ ] Nothing at this moment.
 
 Feel free to commit a pull request with your proposed features!
 
@@ -23,6 +25,8 @@ Feel free to commit a pull request with your proposed features!
 - Internet Information Services
 - SQL Server database access
 - Local write access to local folder
+
+---
 
 ## 🛠️ Setup
 
@@ -68,8 +72,9 @@ The application will automatically generate necessary structures on first run, i
 
 Configure the application as a website in Internet Information Services, and you're done! Make sure to bind the application pool to an user with the right permissions, if you're not using a connection string that's bound to a specific user.
 
+---
 
-## Secure authentication
+## 👮 Secure authentication
 - On first run, a SQLite database `auth.db` will be created with an enhanced security model
 - The system automatically generates a token bound to the machine name:
   ```text
@@ -90,6 +95,27 @@ The system automatically creates tokens during initialization, but you can also:
 - Access tokens in the application logs during generation
 - Bind tokens to specific usernames for better security
 
+## 🗝️ Azure Key Vault Integration
+The application supports Azure Key Vault for secure secret management. Set the KEYVAULT_URI environment variable to your Key Vault's URI, and create secrets following the {environment}-ConnectionString and {environment}-ServerName naming convention.
+
+### Quick Setup
+1. Set the Key Vault URI environment variable:
+   ```powershell
+   $env:KEYVAULT_URI = "https://your-keyvault-name.vault.azure.net/"
+   ```
+   Or persistently:
+   ```powershell
+   [Environment]::SetEnvironmentVariable("KEYVAULT_URI", "https://your-keyvault-name.vault.azure.net/", "Machine")
+   ```
+
+2. Create secrets with naming convention:
+   ```
+   {environment}-ConnectionString
+   {environment}-ServerName
+   ```
+If Key Vault is unavailable, the application automatically falls back to local `settings.json`.
+
+---
 
 ## 🔄 API Usage
 **Pattern:**
@@ -121,7 +147,9 @@ WHERE Assortment = 'Books'
 | `/tokens`                     | Plain text token files for distribution          |
 | `/config/environments`        | Environment configurations                       |
 | `/config/endpoints`           | Endpoint-specific database mappings              |
+
 ---
+
 ## 🔒 Security Model
 The authentication system implements industry best practices:
 - No plaintext tokens stored in the database
@@ -130,6 +158,7 @@ The authentication system implements industry best practices:
 - File-based token distribution for token distribution
 
 ---
+
 ## ✨ Credits
 Built with ❤️ using:
 - [ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/)
