@@ -16,7 +16,12 @@ Remove-Item -Path "$toolsDir\obj" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$toolsDir\bin" -Recurse -Force -ErrorAction SilentlyContinue
 
 # Publish as self-contained
-dotnet publish $toolsDir -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true  -o "$deploymentDir"
+dotnet publish $toolsDir -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o "$deploymentDir"
+
+# Remove .publish.ps1 files from the deployment directory if any were copied
+Write-Host "Removing .publish.ps1 files from deployment directory..." -ForegroundColor Yellow
+Get-ChildItem -Path $deploymentDir -Filter "*.publish.ps1" -Recurse | Remove-Item -Force
+Write-Host "Removed .publish.ps1 files" -ForegroundColor Green
 
 # Remove .pdb files from the deployment directory
 Write-Host "Removing .pdb files from deployment directory..." -ForegroundColor Yellow

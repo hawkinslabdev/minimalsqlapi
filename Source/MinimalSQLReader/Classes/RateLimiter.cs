@@ -381,7 +381,7 @@ public class RateLimiter
     {
         context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         context.Response.ContentType = "application/json";
-        context.Response.Headers["Retry-After"] = retryAfterSeconds.ToString();
+        context.Response.Headers.Append("Retry-After", retryAfterSeconds.ToString());
 
         var retryTime = DateTimeOffset.UtcNow.AddSeconds(retryAfterSeconds).ToString("o");
 

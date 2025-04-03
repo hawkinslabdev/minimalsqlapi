@@ -1,6 +1,7 @@
 using DynamicODataToSQL;
 using DynamicODataToSQL.Interfaces;
 using MinimalSqlReader.Classes;
+using MinimalSqlReader.Interfaces;
 using MinimalSqlReader.Swagger;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
@@ -8,19 +9,21 @@ using System.Text.Json;
 using SqlKata.Compilers;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Configuration.AddJsonFile("appsettings.json", optional: false)
+                     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true);
+
 Log.Logger = new LoggerConfiguration()
-    .ReadFrom.Configuration(builder.Configuration) // Add this
-    .WriteTo.Console(restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Information)
+    .ReadFrom.Configuration(builder.Configuration) 
+    .WriteTo.Console() 
     .WriteTo.File(
         path: "log/minimalsqlreader-.log",
         rollingInterval: RollingInterval.Day,
         fileSizeLimitBytes: 10 * 1024 * 1024,
         rollOnFileSizeLimit: true,
-        retainedFileCountLimit: 5,
-        restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Information,
+        retainedFileCountLimit: 10,
         buffered: true,
         flushToDiskInterval: TimeSpan.FromSeconds(30))
-    .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", Serilog.Events.LogEventLevel.Warning)
     .MinimumLevel.Override("System", Serilog.Events.LogEventLevel.Warning)
@@ -32,7 +35,8 @@ Log.Logger = new LoggerConfiguration()
     .CreateLogger();
 
 builder.Host.UseSerilog();
-builder.Configuration.AddJsonFile("appsettings.json", optional: false);
+
+Log.Information($"🔧 Current environment: {builder.Environment.EnvironmentName}");
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -44,7 +48,7 @@ builder.Services.AddSingleton<IHostedService, StartupLogger>();
 builder.Services.AddSingleton<IEdmModelBuilder, EdmModelBuilder>();
 builder.Services.AddSingleton<Compiler, SqlServerCompiler>();
 builder.Services.AddSingleton<IODataToSqlConverter, ODataToSqlConverter>();
-builder.Services.AddSingleton<EnvironmentSettings>();
+builder.Services.AddSingleton<IEnvironmentSettingsProvider, EnvironmentSettingsProvider>();
 builder.Services.AddScoped<TokenService>();
 
 var swaggerSettings = SwaggerConfiguration.ConfigureSwagger(builder);

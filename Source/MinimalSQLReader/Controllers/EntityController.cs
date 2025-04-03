@@ -3,7 +3,8 @@ using Microsoft.Data.SqlClient;
 using DynamicODataToSQL;
 using Dapper;
 using Flurl;
-using MinimalSqlReader.Classes;
+using MinimalSqlReader.Classes; 
+using MinimalSqlReader.Interfaces;
 using Serilog;
 using System.Text.Json;
 using System.Data;
@@ -12,16 +13,18 @@ namespace MinimalSqlReader.Controllers;
 
 [ApiController]
 [Route("api/{env}/{**endpointPath}")]
-public class DatabaseObjectsController : ControllerBase
+public class EntityController : ControllerBase
 {
     private readonly IODataToSqlConverter _oDataToSqlConverter;
-    private readonly EnvironmentSettings _environmentSettings;
+    private readonly IEnvironmentSettingsProvider _environmentSettingsProvider;
 
-    public DatabaseObjectsController(IODataToSqlConverter oDataToSqlConverter, EnvironmentSettings environmentSettings)
+    public EntityController(
+        IODataToSqlConverter oDataToSqlConverter, 
+        IEnvironmentSettingsProvider environmentSettingsProvider)
     {
         _oDataToSqlConverter = oDataToSqlConverter;
-        _environmentSettings = environmentSettings;
-        Log.Debug("🚀 DatabaseObjectsController constructor triggered");
+        _environmentSettingsProvider = environmentSettingsProvider;
+        Log.Debug("🚀 EntityController constructor triggered");
     }
 
     [HttpGet(Name = "QueryRecords")]
@@ -40,8 +43,8 @@ public class DatabaseObjectsController : ControllerBase
         try
         {
             // Step 1: Validate environment
-            if (!_environmentSettings.TryLoadEnvironment(env, out var connectionString, out var serverName) || 
-                string.IsNullOrEmpty(connectionString))
+            var (connectionString, serverName) = await _environmentSettingsProvider.LoadEnvironmentOrThrowAsync(env);
+            if (string.IsNullOrEmpty(connectionString))
             {
                 return BadRequest(new { error = $"Invalid or missing environment: {env}", success = false });
             }
@@ -117,7 +120,11 @@ public class DatabaseObjectsController : ControllerBase
             var odataParams = BuildODataParameters(top, skip, select, filter, orderby);
             var (query, parameters) = _oDataToSqlConverter.ConvertToSQL($"{schema}.{objectName}", odataParams);
             query = SanitizeSqlQuery(query, schema, objectName);
-            var (rows, isLastPage) = await ExecuteQueryAsync(connectionString, query, parameters, top);
+            
+            // Use explicit type declarations for rows and isLastPage
+            List<dynamic> rows;
+            bool isLastPage;
+            (rows, isLastPage) = await ExecuteQueryAsync(connectionString, query, parameters, top);
 
             // Step 9: Build result
             var result = BuildResult(rows, isLastPage, top, env, endpointPath, 
@@ -261,8 +268,8 @@ public class DatabaseObjectsController : ControllerBase
         try
         {
             // Validate environment and connection string
-            if (!_environmentSettings.TryLoadEnvironment(env, out var connectionString, out var serverName) || 
-                string.IsNullOrEmpty(connectionString))
+            var (connectionString, serverName) = await _environmentSettingsProvider.LoadEnvironmentOrThrowAsync(env);
+            if (string.IsNullOrEmpty(connectionString))
             {
                 return BadRequest(new { error = $"Invalid or missing environment: {env}", success = false });
             }
@@ -507,6 +514,8 @@ public class DatabaseObjectsController : ControllerBase
         }
 
         var endpointName = endpointParts[0];
+        
+        // Use existing EndpointHelper class
         var endpointEntity = EndpointHelper.LoadEndpoint(endpointName);
         if (endpointEntity == null)
         {

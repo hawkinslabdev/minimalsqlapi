@@ -23,11 +23,12 @@ if (Test-Path $authDbBackupPath) {
     Remove-Item $authDbBackupPath -Force
 }
 
-# Step 6: Clean up unnecessary development files
+# Step 6: Clean up unnecessary development files and .publish.ps1 files
 $filesToRemove = @(
     "*.pdb",
     "*.xml",
-    "appsettings.Development.json"
+    "appsettings.Development.json",
+    "*.publish.ps1"
 )
 foreach ($pattern in $filesToRemove) {
     Get-ChildItem -Path "C:\Repository\MinimalSQLReader\Deployment\MinimalSQLReader" -Filter $pattern -Recurse | Remove-Item -Force

@@ -1,19 +1,19 @@
 using Microsoft.Extensions.Hosting;
-using MinimalSqlReader.Classes;
+using MinimalSqlReader.Interfaces; 
 using Serilog;
 
 namespace MinimalSqlReader.Classes;
 
 public class StartupLogger : IHostedService
 {
-    private readonly EnvironmentSettings _environmentSettings;
+    private readonly IEnvironmentSettingsProvider _environmentSettings;
 
-    public StartupLogger(EnvironmentSettings environmentSettings)
+    public StartupLogger(IEnvironmentSettingsProvider environmentSettings)
     {
         _environmentSettings = environmentSettings;
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
         Log.Information("🚀 Application started. Loading environments and endpoints...");
 
@@ -26,8 +26,9 @@ public class StartupLogger : IHostedService
                 var envName = Path.GetFileName(envDir);
                 try
                 {
-                    var (connStr, serverName) = _environmentSettings.LoadEnvironmentOrThrow(envName);
-                    Log.Information("🌍 Loaded environment: {Env} → {ServerName}, DB=`{Database}`", envName, serverName, connStr);
+                    // Changed from LoadEnvironmentOrThrow to LoadEnvironmentOrThrowAsync and added await
+                    var (connectionString, serverName) = await _environmentSettings.LoadEnvironmentOrThrowAsync(envName);
+                    Log.Information("🌍 Loaded environment: {Env} → {ServerName}, DB=`{Database}`", envName, serverName, connectionString);
                 }
                 catch (Exception ex)
                 {
@@ -38,11 +39,11 @@ public class StartupLogger : IHostedService
 
         // Log endpoints
         var endpointRoot = Path.Combine(Directory.GetCurrentDirectory(), "endpoints");
-        var endpoints = EndpointHelper.GetEndpoints();
+        var endpoints = EndpointHelper.GetEndpoints(silent: true);
         
         Log.Debug("📦 Loaded {Count} endpoints from '{Path}'", endpoints.Count, endpointRoot);
 
-        return Task.CompletedTask;
+        return;
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

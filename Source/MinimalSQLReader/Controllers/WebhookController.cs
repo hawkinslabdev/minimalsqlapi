@@ -1,7 +1,8 @@
-using Microsoft.AspNetCore.Mvc;
-using MinimalSqlReader.Classes;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using MinimalSqlReader.Classes;
+using MinimalSqlReader.Interfaces;
 using Serilog;
 using Dapper;
 using System.Text.RegularExpressions;
@@ -14,13 +15,13 @@ namespace MinimalSqlReader.Controllers;
 [Route("webhook/{env}/{webhookId}")]
 public class WebhookController : ControllerBase
 {
-    private readonly EnvironmentSettings _environmentSettings;
+    private readonly IEnvironmentSettingsProvider _environmentSettingsProvider;
     private readonly Dictionary<string, dynamic> _endpointConfigCache = new();
     private static readonly Regex _validIdentifierRegex = new Regex(@"^[a-zA-Z0-9_]+$", RegexOptions.Compiled);
 
-    public WebhookController(EnvironmentSettings environmentSettings)
+    public WebhookController(IEnvironmentSettingsProvider environmentSettingsProvider)
     {
-        _environmentSettings = environmentSettings;
+        _environmentSettingsProvider = environmentSettingsProvider;
     }
 
     [HttpPost]
@@ -31,11 +32,8 @@ public class WebhookController : ControllerBase
 
         try
         {
-            // Validate environment
-            if (!_environmentSettings.TryLoadEnvironment(env, out var connectionString, out var serverName))
-            {
-                return BadRequest(new { error = $"Environment '{env}' is invalid or missing.", success = false });
-            }
+            // Validate environment and get connection string using the interface method
+            var (connectionString, serverName) = await _environmentSettingsProvider.LoadEnvironmentOrThrowAsync(env);
 
             if (string.IsNullOrWhiteSpace(connectionString))
             {
@@ -100,18 +98,49 @@ public class WebhookController : ControllerBase
         }
     }
 
-    private dynamic GetEndpointConfiguration(string endpointName)
+    private dynamic? GetEndpointConfiguration(string endpointName)
     {
-        // Cache the endpoint configuration to avoid loading it on every request
-        if (!_endpointConfigCache.TryGetValue(endpointName, out var config))
+        if (_endpointConfigCache.TryGetValue(endpointName, out var cachedConfig))
         {
-            config = EndpointHelper.LoadEndpoint(endpointName);
-            if (config != null)
-            {
-                _endpointConfigCache[endpointName] = config;
-            }
+            return cachedConfig;
         }
-        return config ?? new object();
+
+        var config = LoadEndpointConfiguration(endpointName);
+        
+        if (config != null)
+        {
+            _endpointConfigCache[endpointName] = config;
+        }
+
+        return config;
+    }
+
+    private dynamic? LoadEndpointConfiguration(string endpointName)
+    {
+        var endpointEntity = EndpointHelper.LoadEndpoint(endpointName);
+        
+        if (endpointEntity != null)
+        {
+            return new 
+            { 
+                DatabaseObjectName = endpointEntity.DatabaseObjectName,
+                DatabaseSchema = endpointEntity.DatabaseSchema,
+                AllowedColumns = endpointEntity.AllowedColumns
+            };
+        }
+        
+        // If can't load from EndpointHelper, fall back to default configuration
+        if (endpointName == "Webhooks")
+        {
+            return new 
+            { 
+                DatabaseObjectName = "WebhookData",
+                DatabaseSchema = "dbo",
+                AllowedColumns = new[] { "webhook1", "webhook2" }
+            };
+        }
+
+        return null;
     }
 
     private bool IsValidSqlIdentifier(string identifier)
@@ -136,7 +165,6 @@ public class WebhookController : ControllerBase
             if (!tableExists)
             {
                 // Create the table if it doesn't exist
-                // Use parameterized TableName and Schema where possible and validated identifiers elsewhere
                 var createTableSql = $@"
                     CREATE TABLE [{schema}].[{tableName}] (
                         Id INT IDENTITY(1,1) PRIMARY KEY,
