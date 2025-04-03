@@ -449,7 +449,7 @@ public static class SwaggerConfiguration
             if (section.Exists())
             {
                 section.Bind(swaggerSettings);
-                Log.Information("✅ Swagger configuration loaded from appsettings.json");
+                Log.Debug("✅ Swagger configuration loaded from appsettings.json");
             }
             else
             {

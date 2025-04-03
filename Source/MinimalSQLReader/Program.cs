@@ -80,10 +80,17 @@ using (var scope = app.Services.CreateScope())
 
         if (!context.Tokens.Any())
         {
+            string MaskToken(string token, int visibleChars = 4, char maskChar = '*')
+            {
+                if (string.IsNullOrEmpty(token) || token.Length <= visibleChars)
+                    return token;
+                    
+                return token.Substring(0, visibleChars) + new string(maskChar, token.Length - visibleChars);
+            }           
             string username = Environment.MachineName;
             var token = await tokenService.GenerateTokenAsync(username);
-            Log.Information("🗝️ Generated token for {Username}: {Token}", username, token);
-            Log.Information("💾 Token saved to: {Path}", Path.Combine(Directory.GetCurrentDirectory(), "tokens", $"{username}.txt"));
+
+            Log.Information("🗝️ Generated token for {Username}: {Token}", username, MaskToken(token));            Log.Information("💾 Token saved to: {Path}", Path.Combine(Directory.GetCurrentDirectory(), "tokens", $"{username}.txt"));
         }
     }
     catch (Exception ex)

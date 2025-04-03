@@ -409,8 +409,16 @@ public class RateLimiter
 
     private TokenBucket CreateBucket(string key, int limit, int windowSeconds, string type)
     {
+        string MaskKey(string key, int visibleChars = 4, char maskChar = '*')
+        {
+            if (string.IsNullOrEmpty(key) || key.Length <= visibleChars)
+                return key;
+                
+            return key.Substring(0, visibleChars) + new string(maskChar, key.Length - visibleChars);
+        }
+
         _logger.LogInformation("🔧 Created {Type} rate limit bucket for {Key} with limit: {Limit}/{Window}s",
-            type, key, limit, windowSeconds);
+            type, MaskKey(key), limit, windowSeconds);
             
         return new TokenBucket(
             limit,
