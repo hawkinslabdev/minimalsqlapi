@@ -1,6 +1,6 @@
 # ✨ Minimal SQL Server API
 
-A dynamic, environment-aware SQL Server API for Internet Information Services. Built on .NET (ASP.NET Core), featuring secure bearer token authentication, endpoint mapping via JSON configuration files, and Serilog-powered logging. Supports SQL Server and enables flexible query generation using OData syntax. Now also supports a POST-route for webhook-functionality.
+A dynamic, environment-aware SQL Server API for Internet Information Services. Built on .NET (ASP.NET Core), featuring secure bearer token authentication, endpoint mapping via JSON configuration files, and Serilog-powered logging. Supports SQL Server and enables flexible query generation using OData syntax. It supports CRUD, including a generic POST-route for webhook-like functionality.
 
 ![Screenshot of Swagger UI](https://raw.githubusercontent.com/hawkinslabdev/minimalsqlreader/refs/heads/main/Source/example.png)
 
@@ -12,6 +12,9 @@ A dynamic, environment-aware SQL Server API for Internet Information Services. B
 - Stored procedure support for data manipulation
 - Automatic Swagger documentation for endpoints
 - Serilog-powered logging with daily rotation
+
+## 🗺️ Roadmap
+- [ ] Implement secret management for Azure Key Vault and HashiCorp Vault
 
 Feel free to commit a pull request with your proposed features!
 
@@ -123,9 +126,8 @@ WHERE Assortment = 'Books'
 The authentication system implements industry best practices:
 - No plaintext tokens stored in the database
 - Cryptographically secure hashing with PBKDF2/SHA256
-- Unique salt generation for each token
 - Username binding for token ownership and auditing
-- File-based token distribution for better management
+- File-based token distribution for token distribution
 
 ---
 ## ✨ Credits
@@ -134,4 +136,5 @@ Built with ❤️ using:
 - [DynamicODataToSQL](https://github.com/your-org/dynamicodata-to-sql)
 - [Serilog](https://serilog.net/)
 - [SQLite](https://www.sqlite.org/index.html)
-*Generated on 2025-03-30*
+
+Feel free to submit a PR if you'd like to contribute.
