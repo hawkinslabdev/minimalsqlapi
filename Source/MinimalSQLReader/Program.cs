@@ -142,7 +142,18 @@ app.UseStatusCodePages(async context =>
     var json = JsonSerializer.Serialize(new { error = message, success = false, statusCode = response.StatusCode });
     await response.WriteAsync(json);
 });
-
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers.Remove("X-Powered-By");
+        context.Response.Headers.Remove("X-AspNet-Version");
+        context.Response.Headers.Remove("X-AspNetMvc-Version");
+        context.Response.Headers.Remove("Server");
+        return Task.CompletedTask;
+    });
+    await next();
+});
 
 app.UseMiddleware<RateLimiter>();
 app.UseAuthorization();
