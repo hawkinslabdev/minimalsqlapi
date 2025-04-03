@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,6 +10,110 @@ using Serilog;
 
 namespace TokenGenerator
 {
+    public class AppSettings
+    {
+        public string DatabasePath { get; set; } = string.Empty;
+
+        // Method to resolve the full path, supporting both absolute and relative paths
+        public string GetResolvedDatabasePath()
+        {
+            // If the path is already absolute, return it directly
+            if (Path.IsPathRooted(DatabasePath))
+            {
+                return DatabasePath;
+            }
+
+            // If the path is relative, resolve it from the base directory
+            string basePath = AppDomain.CurrentDomain.BaseDirectory;
+            
+            // Support multiple relative path scenarios
+            string[] relativePaths = new[]
+            {
+                Path.Combine(basePath, DatabasePath),           // Relative to base directory
+                Path.Combine(basePath, "..", "..", DatabasePath), // Two levels up from base directory
+                Path.Combine(basePath, "..", DatabasePath),    // One level up from base directory
+            };
+
+            // Find the first path that exists
+            foreach (var path in relativePaths)
+            {
+                string fullPath = Path.GetFullPath(path);
+                if (File.Exists(fullPath))
+                {
+                    return fullPath;
+                }
+            }
+
+            // If no existing path is found, return the first resolved path
+            return Path.GetFullPath(relativePaths[0]);
+        }
+
+        // Method to load settings from a JSON file
+        public static AppSettings LoadSettings(string settingsPath = null)
+        {
+            // Default settings file path
+            settingsPath ??= Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
+
+            // If no settings file exists, create a default one
+            if (!File.Exists(settingsPath))
+            {
+                var defaultSettings = new AppSettings
+                {
+                    // Default to a relative path two folders up
+                    DatabasePath = Path.Combine("..", "..", "auth.db")
+                };
+
+                // Ensure directory exists
+                var directory = Path.GetDirectoryName(settingsPath);
+                if (directory != null)
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                // Save default settings
+                File.WriteAllText(
+                    settingsPath, 
+                    JsonSerializer.Serialize(defaultSettings, new JsonSerializerOptions { WriteIndented = true })
+                );
+
+                return defaultSettings;
+            }
+
+            // Read and parse existing settings file
+            try 
+            {
+                string jsonContent = File.ReadAllText(settingsPath);
+                var settings = JsonSerializer.Deserialize<AppSettings>(jsonContent) ?? new AppSettings();
+
+                // Ensure we have a valid settings object
+                return settings ?? new AppSettings();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error reading settings file: {ex.Message}");
+                return new AppSettings();
+            }
+        }
+
+        // Method to save settings
+        public void SaveSettings(string settingsPath = null)
+        {
+            settingsPath ??= Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
+
+            try 
+            {
+                File.WriteAllText(
+                    settingsPath, 
+                    JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })
+                );
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error saving settings file: {ex.Message}");
+            }
+        }
+    }
+
     public class AuthToken
     {
         public int Id { get; set; }
@@ -160,8 +265,9 @@ namespace TokenGenerator
                 using (var scope = serviceProvider.CreateScope())
                 {
                     var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+                    var appSettings = scope.ServiceProvider.GetRequiredService<AppSettings>();
                     
-                    var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "auth.db");
+                    var dbPath = appSettings.GetResolvedDatabasePath();
                     if (!File.Exists(dbPath))
                     {
                         DisplayErrorAndExit("Database not found. Please run the main application first.");
@@ -205,6 +311,9 @@ namespace TokenGenerator
                         case "3":
                             await RevokeTokenAsync(serviceProvider);
                             break;
+                        case "4":
+                            UpdateDatabasePath(serviceProvider);
+                            break;
                         case "0":
                             exitRequested = true;
                             break;
@@ -246,6 +355,7 @@ namespace TokenGenerator
             Console.WriteLine("1. List all existing tokens");
             Console.WriteLine("2. Generate new token");
             Console.WriteLine("3. Revoke token");
+            Console.WriteLine("4. Update Database Path");
             Console.WriteLine("0. Exit");
             Console.WriteLine("-----------------------------------------------");
             Console.Write("Select an option: ");
@@ -357,15 +467,45 @@ namespace TokenGenerator
             }
         }
 
+        static void UpdateDatabasePath(IServiceProvider serviceProvider)
+        {
+            Console.WriteLine("\n=== Update Database Path ===");
+            Console.WriteLine("Enter new database path:");
+            Console.WriteLine("- Full absolute path (e.g., C:\\path\\to\\auth.db)");
+            Console.WriteLine("- Relative path (e.g., ..\\..\\auth.db)");
+            Console.Write("Path: ");
+            string newPath = Console.ReadLine();
+
+            if (string.IsNullOrWhiteSpace(newPath))
+            {
+                Console.WriteLine("Path update cancelled.");
+                return;
+            }
+
+            // Retrieve the app settings
+            var appSettings = serviceProvider.GetRequiredService<AppSettings>();
+            
+            // Update and save the path
+            appSettings.DatabasePath = newPath;
+            appSettings.SaveSettings();
+
+            Console.WriteLine($"Database path updated to: {newPath}");
+            Console.WriteLine($"Resolved full path: {appSettings.GetResolvedDatabasePath()}");
+            Console.WriteLine("Restart the application for changes to take effect.");
+        }
+
         static IServiceProvider ConfigureServices()
         {
+            // Load settings
+            var appSettings = AppSettings.LoadSettings();
+            
             var services = new ServiceCollection();
             
-            var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "auth.db");
-            
+            // Use the resolved database path
             services.AddDbContext<AuthDbContext>(options =>
-                options.UseSqlite($"Data Source={dbPath}"));
+                options.UseSqlite($"Data Source={appSettings.GetResolvedDatabasePath()}"));
 
+            services.AddSingleton(appSettings);
             services.AddScoped<TokenService>();
             
             return services.BuildServiceProvider();
